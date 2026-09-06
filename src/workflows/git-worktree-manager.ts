@@ -17,6 +17,14 @@ export class GitWorktreeManager {
     await exec("git", ["-C", repositoryRoot, "worktree", "add", "-b", branch, worktreePath, baseCommitSha], { windowsHide: true });
     return { repositoryId, originalRepositoryRoot: repositoryRoot, baseCommitSha, branch, worktreePath, workflowId, taskId, attemptId, createdByOrchestrator: true };
   }
-  async changedFiles(worktree: TaskWorktree): Promise<string[]> { const { stdout } = await exec("git", ["-C", worktree.worktreePath, "diff", "--name-only", "-z", worktree.baseCommitSha], { windowsHide: true }); return stdout.split("\0").filter(Boolean); }
+  async changedFiles(worktree: TaskWorktree): Promise<string[]> {
+    // --no-index status includes staged/unstaged adds, modifications, deletions and renames;
+    // untracked files must be queried separately because git diff does not report them.
+    const [{ stdout: tracked }, { stdout: untracked }] = await Promise.all([
+      exec("git", ["-C", worktree.worktreePath, "diff", "--name-only", "-z", "--find-renames", worktree.baseCommitSha], { windowsHide: true }),
+      exec("git", ["-C", worktree.worktreePath, "ls-files", "--others", "--exclude-standard", "-z"], { windowsHide: true }),
+    ]);
+    return [...new Set([...tracked.split("\0"), ...untracked.split("\0")].filter(Boolean))];
+  }
   async cleanup(worktree: TaskWorktree): Promise<void> { if (!worktree.createdByOrchestrator || !worktree.worktreePath.includes(`${path.sep}.orchestrator${path.sep}`)) return; await exec("git", ["-C", worktree.originalRepositoryRoot, "worktree", "remove", "--force", worktree.worktreePath], { windowsHide: true }); await exec("git", ["-C", worktree.originalRepositoryRoot, "branch", "-D", worktree.branch], { windowsHide: true }); }
 }

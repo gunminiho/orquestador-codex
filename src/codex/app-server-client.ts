@@ -22,7 +22,7 @@ import type { TurnCompletedNotification } from "../../schemas/v2/TurnCompletedNo
 import type { AgentMessageDeltaNotification } from "../../schemas/v2/AgentMessageDeltaNotification";
 import type { Turn } from "../../schemas/v2/Turn";
 import type { GetAccountRateLimitsResponse } from "../../schemas/v2/GetAccountRateLimitsResponse";
-import { CodexTurnError } from "./codex-errors";
+import { CodexRpcError, CodexTurnError } from "./codex-errors";
 
 type RpcId =
   | number
@@ -703,11 +703,7 @@ export class CodexAppServerClient {
       "error" in
       message
     ) {
-      pending.reject(
-        new Error(
-          `Codex RPC error ${message.error.code}: ${message.error.message}`,
-        ),
-      );
+      pending.reject(new CodexRpcError(message.error.code, message.error.message, message.error.data));
 
       return;
     }
