@@ -22,6 +22,8 @@ import type { TurnCompletedNotification } from "../../schemas/v2/TurnCompletedNo
 import type { AgentMessageDeltaNotification } from "../../schemas/v2/AgentMessageDeltaNotification";
 import type { Turn } from "../../schemas/v2/Turn";
 import type { GetAccountRateLimitsResponse } from "../../schemas/v2/GetAccountRateLimitsResponse";
+import type { TurnInterruptResponse } from "../../schemas/v2/TurnInterruptResponse";
+import type { TurnInterruptParams } from "../../schemas/v2/TurnInterruptParams";
 import { CodexRpcError, CodexTurnError } from "./codex-errors";
 
 type RpcId =
@@ -351,6 +353,11 @@ export class CodexAppServerClient {
       turn:
         completed.turn,
     };
+  }
+
+  async interruptTurn(threadId: string, turnId: string): Promise<TurnInterruptResponse> {
+    const params: TurnInterruptParams = { threadId, turnId };
+    return this.request<TurnInterruptResponse>("turn/interrupt", params);
   }
 
   async getAccountRateLimits(): Promise<GetAccountRateLimitsResponse> {

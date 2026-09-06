@@ -16,7 +16,21 @@ import { WorkflowStore } from "../workflows/workflow-store";
 export class ProjectRuntime {
   readonly scheduler: RateLimitScheduler;
   private constructor(readonly projectId: string, readonly client: CodexAppServerClient, readonly store: WorkflowStore, readonly engine: WorkflowEngine, readonly runner: WorkflowRunner) { this.scheduler = new RateLimitScheduler(engine, client); }
-  async execute(workflowId: string) { let workflow = await this.store.get(this.projectId, workflowId); if (workflow.state === "PAUSED_RATE_LIMIT") workflow = await this.scheduler.waitForAvailability(workflow); return this.runner.runUntilPauseOrTerminal(workflow); }
+  async execute(workflowId: string) {
+    // Always reload between side effects: a runner pause is itself a durable checkpoint.
+    for (;;) {
+      let workflow = await this.store.get(this.projectId, workflowId);
+      if (workflow.state === "PAUSED_RATE_LIMIT") { await this.scheduler.waitForAvailability(workflow); continue; }
+      if (workflow.state === "PAUSED_TRANSIENT") {
+        const retryAt = workflow.transient ? Date.parse(workflow.transient.retryAt) : 0;
+        if (retryAt > Date.now()) await new Promise((resolve) => setTimeout(resolve, retryAt - Date.now()));
+        workflow = await this.engine.resumePaused(await this.store.get(this.projectId, workflowId));
+      }
+      const result = await this.runner.runUntilPauseOrTerminal(workflow);
+      if (result.state === "PAUSED_RATE_LIMIT" || result.state === "PAUSED_TRANSIENT") continue;
+      return result;
+    }
+  }
   async stop() { this.client.stop(); }
   static async create(root: string, projectId: string): Promise<ProjectRuntime> {
     const project = await new ProjectRegistryStore(root).getProject(projectId); const client = new CodexAppServerClient(); const stateStore = new OrchestratorStateStore(root); const state = await stateStore.load(); await client.start();
