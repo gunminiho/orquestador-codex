@@ -1,11 +1,7 @@
-import { WorkflowEngine } from "../workflows/workflow-engine";
+import { ProjectRuntime } from "../runtime/project-runtime";
 import { WorkflowStore } from "../workflows/workflow-store";
-const args = process.argv.slice(2); const command = args[0]; const value = (flag: string) => { const index = args.indexOf(flag); return index < 0 ? undefined : args[index + 1]; }; const project = value("--project"); const id = value("--workflow"); const store = new WorkflowStore(process.cwd()); const engine = new WorkflowEngine(store);
+const args = process.argv.slice(2); const command = args[0]; const value = (flag: string) => { const i = args.indexOf(flag); return i < 0 ? undefined : args[i + 1]; }; const project = value("--project"); const id = value("--workflow");
 if (!command || !project) throw new Error("Usage: workflow:<action> --project <id>");
-if (command === "list") console.log(JSON.stringify(await store.list(project), null, 2));
-else if (command === "show") { if (!id) throw new Error("--workflow required"); console.log(JSON.stringify(await store.get(project, id), null, 2)); }
-else if (command === "start") { const request = value("--request"); if (!request) throw new Error("--request required"); console.log(JSON.stringify(await engine.create(project, request), null, 2)); }
-else if (command === "cancel") { if (!id) throw new Error("--workflow required"); await engine.transition(await store.get(project, id), "CANCELLED", "Cancelled by owner"); }
-else if (command === "answer") { const answer = value("--answer"); if (!id || !answer) throw new Error("--workflow and --answer required"); await engine.answerOwnerInput(await store.get(project, id), answer); }
-else if (command === "resume") { if (!id) throw new Error("--workflow required"); console.log(JSON.stringify(await engine.resumePaused(await store.get(project, id)), null, 2)); }
-else throw new Error(`Unknown workflow command: ${command}`);
+if (command === "list") console.log(JSON.stringify(await new WorkflowStore(process.cwd()).list(project), null, 2));
+else if (command === "show") { if (!id) throw new Error("--workflow required"); console.log(JSON.stringify(await new WorkflowStore(process.cwd()).get(project, id), null, 2)); }
+else { const runtime = await ProjectRuntime.create(process.cwd(), project); try { let workflow; if (command === "start") { const request = value("--request"); if (!request) throw new Error("--request required"); workflow = await runtime.engine.create(project, request); } else { if (!id) throw new Error("--workflow required"); workflow = await runtime.store.get(project, id); if (command === "answer") { const answer = value("--answer"); if (!answer) throw new Error("--answer required"); workflow = await runtime.engine.answerOwnerInput(workflow, answer); } else if (command === "cancel") workflow = await runtime.engine.transition(workflow, "CANCELLED", "Cancelled by owner"); } if (command !== "cancel") workflow = await runtime.execute(workflow.id); console.log(JSON.stringify(workflow, null, 2)); } finally { await runtime.stop(); } }
