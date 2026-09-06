@@ -103,7 +103,7 @@ export class WorkflowEngine {
   async review(workflow: Workflow, review: ReviewResult): Promise<Workflow> {
     const next =
       review.decision === "APPROVED"
-        ? "APPROVED"
+        ? "FINALIZING_DELIVERY"
         : review.decision === "CHANGES_REQUESTED"
           ? "CHANGES_REQUESTED"
           : "BLOCKED";
@@ -115,12 +115,38 @@ export class WorkflowEngine {
           next === "CHANGES_REQUESTED"
             ? workflow.retryCount + 1
             : workflow.retryCount,
-        phase: next === "CHANGES_REQUESTED" ? "implementation" : "complete",
+        phase:
+          next === "CHANGES_REQUESTED"
+            ? "implementation"
+            : next === "FINALIZING_DELIVERY"
+              ? "delivery"
+              : "complete",
         pendingAction:
-          next === "CHANGES_REQUESTED" ? "implement-correction" : null,
+          next === "CHANGES_REQUESTED"
+            ? "implement-correction"
+            : next === "FINALIZING_DELIVERY"
+              ? "finalize-delivery"
+              : null,
       },
       next,
-      `Architect review: ${review.decision}`,
+      review.decision === "APPROVED"
+        ? "Architect review: APPROVED; delivery finalization pending"
+        : `Architect review: ${review.decision}`,
+    );
+  }
+
+  async completeApprovedDelivery(workflow: Workflow): Promise<Workflow> {
+    if (workflow.state !== "FINALIZING_DELIVERY") {
+      throw new Error("Only a finalizing workflow can become approved");
+    }
+    return this.transition(
+      {
+        ...workflow,
+        phase: "complete",
+        pendingAction: null,
+      },
+      "APPROVED",
+      "Approved delivery finalized durably",
     );
   }
 

@@ -147,7 +147,7 @@ for (const changes of [true, false])
       new TaskWorkspace(root, ownership, new WorkflowStore(root)),
     );
     workflow = await restoredRunner.runUntilPauseOrTerminal(workflow);
-    assert.equal(workflow.state, "APPROVED");
+    assert.equal(workflow.state, "FINALIZING_DELIVERY");
     assert.equal(cwds[0], cwds[1]);
     assert.notEqual(cwds[0], repo);
     assert.equal(

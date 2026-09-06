@@ -118,7 +118,7 @@ test("correction includes requiredChanges findings validationRequired and reuses
     ownership,
     workspace,
   ).runUntilPauseOrTerminal(workflow);
-  assert.equal(workflow.state, "APPROVED");
+  assert.equal(workflow.state, "FINALIZING_DELIVERY");
   assert.equal(cwds.length, 2);
   assert.equal(cwds[0], cwds[1]);
   for (const required of [

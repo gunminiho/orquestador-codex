@@ -1,4 +1,8 @@
 import { atomicReplace } from "../state/atomic-file";
+import {
+  acquireDurableClaim,
+  DurableClaimBusyError,
+} from "../state/reconciliation-claim";
 import { open, readFile, realpath, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -102,29 +106,41 @@ export class RepositoryLock {
       existing.taskId === input.taskId &&
       this.isDead(existing)
     ) {
-      // Do not delete a stale lock here: two restart contenders could both win.
-      // A separate atomic reconciliation claim elects exactly one adopter.
       const claim = this.file(physicalRoot) + ".reconcile";
-      let handle;
+      let release: () => Promise<void>;
       try {
-        handle = await open(claim, "wx");
-      } catch {
+        release = await acquireDurableClaim(claim, {
+          targetPath: this.file(physicalRoot),
+          targetIdentity: this.leaseIdentity(existing),
+        });
+      } catch (error) {
+        if (!(error instanceof DurableClaimBusyError)) throw error;
+        if (error.owner.hostname !== os.hostname()) {
+          throw new StaleForeignRepositoryLockError(existing);
+        }
         throw new RepositoryBusyError(
           "Repository lock reconciliation is already owned",
         );
       }
       try {
-        const latest = await this.inspect(physicalRoot);
+        let latest: RepositoryLease;
+        try {
+          latest = await this.inspect(physicalRoot);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return this.acquire(input);
+          }
+          throw error;
+        }
         if (
           !this.isDead(latest) ||
-          latest.owner.sessionId !== existing.owner.sessionId
+          this.leaseIdentity(latest) !== this.leaseIdentity(existing)
         )
           throw new RepositoryBusyError("Repository owner changed");
         await unlink(this.file(physicalRoot));
         return await this.acquire(input);
       } finally {
-        await handle.close();
-        await unlink(claim);
+        await release();
       }
     }
     if (this.isDead(existing)) {
@@ -154,6 +170,10 @@ export class RepositoryLock {
       !processAlive(lease.owner.pid) &&
       (lease.owner.serverPid === null || !processAlive(lease.owner.serverPid))
     );
+  }
+
+  private leaseIdentity(lease: RepositoryLease): string {
+    return `${lease.owner.sessionId}:${lease.owner.pid}:${lease.owner.serverPid}`;
   }
 
   async release(lease: RepositoryLease): Promise<boolean> {

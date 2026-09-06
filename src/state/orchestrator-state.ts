@@ -2,6 +2,10 @@ import { atomicReplace } from "./atomic-file";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import {
+  acquireDurableClaim,
+  DurableClaimBusyError,
+} from "./reconciliation-claim";
 
 export type AgentRole = "architect" | "backend" | "frontend";
 export type AgentState = { threadId: string };
@@ -233,7 +237,17 @@ export class OrchestratorStateStore {
         throw error;
       }
       if (this.isProvenDead(existing)) {
-        await this.reconcileDeadMutationLock(existing);
+        try {
+          await this.reconcileDeadMutationLock(existing);
+        } catch (error) {
+          if (
+            !(error instanceof DurableClaimBusyError) ||
+            error.owner.hostname !== os.hostname()
+          ) {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
         continue;
       }
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -257,15 +271,18 @@ export class OrchestratorStateStore {
   private async reconcileDeadMutationLock(
     existing: MutationLease,
   ): Promise<void> {
-    let claim;
+    const release = await acquireDurableClaim(this.mutationClaim, {
+      targetPath: this.mutationLock,
+      targetIdentity: `${existing.sessionId}:${existing.pid}`,
+    });
     try {
-      claim = await open(this.mutationClaim, "wx");
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      return;
-    }
-    try {
-      const latest = await this.readMutationLease();
+      let latest: MutationLease;
+      try {
+        latest = await this.readMutationLease();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+      }
       if (
         latest.sessionId === existing.sessionId &&
         latest.pid === existing.pid &&
@@ -274,8 +291,7 @@ export class OrchestratorStateStore {
         await unlink(this.mutationLock);
       }
     } finally {
-      await claim.close();
-      await unlink(this.mutationClaim);
+      await release();
     }
   }
 }

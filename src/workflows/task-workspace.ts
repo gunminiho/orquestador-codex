@@ -167,8 +167,12 @@ export class TaskWorkspace {
    * cannot make an approved result unreachable.
    */
   async finalizeApproved(workflow: Workflow): Promise<Workflow> {
-    if (workflow.state !== "APPROVED")
-      throw new Error("Only approved work can be finalized");
+    if (
+      workflow.state !== "FINALIZING_DELIVERY" &&
+      workflow.state !== "APPROVED"
+    ) {
+      throw new Error("Only an approved delivery can be finalized");
+    }
     if (!workflow.assignment || !workflow.reports.length) {
       throw new Error("Approved workflow has no assignment/report to verify");
     }
@@ -183,7 +187,9 @@ export class TaskWorkspace {
     );
     if (!pending.length) return workflow;
 
-    const verifier = this.verifierForWorktrees(pending);
+    // Keep every task repository resolvable for the full TASK_REPORT, while
+    // calculating authoritative deltas only for worktrees not yet delivered.
+    const verifier = this.verifierForWorktrees(workflow.worktrees);
     const baselines = pending.map((worktree) => ({
       repositoryId: worktree.repositoryId,
       head: worktree.baseCommitSha,
@@ -249,7 +255,10 @@ export class TaskWorkspace {
   }
 
   async cleanup(workflow: Workflow): Promise<void> {
-    const preserveApprovedBranches = workflow.state === "APPROVED";
+    const preserveApprovedBranches =
+      !workflow.cancellationRequestedAt &&
+      (workflow.state === "APPROVED" ||
+        workflow.state === "FINALIZING_DELIVERY");
     if (preserveApprovedBranches) {
       const missing = workflow.worktrees.filter(
         (worktree) =>

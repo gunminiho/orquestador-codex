@@ -38,6 +38,7 @@ export class WorkflowRunner {
           "PAUSED_MANUAL",
           "PAUSED_RATE_LIMIT",
           "PAUSED_TRANSIENT",
+          "FINALIZING_DELIVERY",
         ].includes(current.state)
       )
         return current;

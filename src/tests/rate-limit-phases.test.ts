@@ -125,7 +125,7 @@ for (const phase of ["PLANNING", "IMPLEMENTING", "REVIEWING"])
     assert.equal(workflow.state, phase);
     assert.equal(
       (await runner.runUntilPauseOrTerminal(workflow)).state,
-      "APPROVED",
+      "FINALIZING_DELIVERY",
     );
   });
 test("fallback backoff persists nextCheckAt before waiting", async () => {

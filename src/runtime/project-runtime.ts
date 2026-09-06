@@ -103,6 +103,9 @@ export class ProjectRuntime {
         if (workflow.activeTurn?.turnId) await this.lifecycle.start();
         return this.cancellation.cancel(this.projectId, workflowId);
       }
+      if (workflow.state === "FINALIZING_DELIVERY") {
+        return this.finalizeDelivery(workflow);
+      }
       try {
         if (workflow.state === "PAUSED_TRANSIENT") {
           await this.lifecycle.recover(workflow, this.store, this.engine);
@@ -147,6 +150,9 @@ export class ProjectRuntime {
         workflow.state === "PAUSED_TRANSIENT"
       )
         continue;
+      if (workflow.state === "FINALIZING_DELIVERY") {
+        return this.finalizeDelivery(workflow);
+      }
       if (isTerminal(workflow.state)) return this.finalizeTerminal(workflow);
       return workflow;
     }
@@ -195,6 +201,15 @@ export class ProjectRuntime {
     }
     await this.workspace.cleanup(workflow);
     return workflow;
+  }
+
+  /** Finalization is recoverable until every result is durable and cleanup succeeds. */
+  private async finalizeDelivery(
+    workflow: Awaited<ReturnType<WorkflowStore["get"]>>,
+  ) {
+    const delivered = await this.workspace.finalizeApproved(workflow);
+    await this.workspace.cleanup(delivered);
+    return this.engine.completeApprovedDelivery(delivered);
   }
 
   async stop() {

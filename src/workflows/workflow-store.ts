@@ -1,4 +1,5 @@
 import { atomicReplace } from "../state/atomic-file";
+import { createHash } from "node:crypto";
 import {
   copyFile,
   link,
@@ -13,7 +14,9 @@ import path from "node:path";
 import {
   ProjectIdSchema,
   WorkflowIdSchema,
+  DeliverySchema,
   WorkflowSchema,
+  type Delivery,
   type Workflow,
   isTerminal,
 } from "./workflow-schema";
@@ -30,6 +33,18 @@ export class WorkflowStore {
   }
   private file(projectId: string, id: string) {
     return path.join(this.dir(projectId), `${WorkflowIdSchema.parse(id)}.json`);
+  }
+  private deliveryDirectory(projectId: string, id: string) {
+    return path.join(
+      this.dir(projectId),
+      `${WorkflowIdSchema.parse(id)}.deliveries`,
+    );
+  }
+  private deliveryFile(projectId: string, id: string, delivery: Delivery) {
+    const identity = createHash("sha256")
+      .update(`${delivery.repositoryId}\0${delivery.taskId}`)
+      .digest("hex");
+    return path.join(this.deliveryDirectory(projectId, id), `${identity}.json`);
   }
   private async atomicWrite(file: string, value: unknown): Promise<string> {
     const temporary = `${file}.${crypto.randomUUID()}.tmp`;
@@ -53,6 +68,10 @@ export class WorkflowStore {
       if (parsed.success) {
         const latest = parsed.data;
         if (isTerminal(latest.state)) return;
+        value = {
+          ...value,
+          deliveries: this.mergeDeliveries(latest.deliveries, value.deliveries),
+        };
         if (await this.cancellationTime(value.projectId, value.id)) {
           value =
             value.state === "CANCELLED"
@@ -95,9 +114,9 @@ export class WorkflowStore {
   }
 
   /**
-   * Delivery is the only mutable part of an approved workflow. Keeping it in a
-   * narrow store operation prevents late runtime events from replacing a
-   * terminal workflow while still making result commits durable before cleanup.
+   * Each repository delivery has an independent durable record. That avoids a
+   * whole-workflow read/merge/write race when multiple repositories finalize
+   * or integrate concurrently; get() reconstructs their merged view.
    */
   async saveApprovedDeliveries(
     projectId: string,
@@ -105,27 +124,22 @@ export class WorkflowStore {
     deliveries: Workflow["deliveries"],
   ): Promise<Workflow> {
     const latest = await this.get(projectId, id);
-    if (latest.state !== "APPROVED") {
+    if (latest.state !== "FINALIZING_DELIVERY" && latest.state !== "APPROVED") {
       throw new Error(
         "Only an approved workflow can persist delivery metadata",
       );
     }
-    const merged = new Map(
-      latest.deliveries.map((delivery) => [
-        `${delivery.repositoryId}:${delivery.taskId}`,
-        delivery,
-      ]),
+    await mkdir(this.deliveryDirectory(projectId, id), { recursive: true });
+    await Promise.all(
+      deliveries.map(async (delivery) => {
+        const file = this.deliveryFile(projectId, id, delivery);
+        const temporary = await this.atomicWrite(
+          file,
+          DeliverySchema.parse(delivery),
+        );
+        await atomicReplace(temporary, file);
+      }),
     );
-    for (const delivery of deliveries) {
-      merged.set(`${delivery.repositoryId}:${delivery.taskId}`, delivery);
-    }
-    const value = WorkflowSchema.parse({
-      ...latest,
-      deliveries: [...merged.values()],
-      updatedAt: new Date().toISOString(),
-    });
-    const temporary = await this.atomicWrite(this.file(projectId, id), value);
-    await atomicReplace(temporary, this.file(projectId, id));
     return this.get(projectId, id);
   }
   private async cancellationTime(
@@ -145,6 +159,10 @@ export class WorkflowStore {
   }
   async get(projectId: string, id: string): Promise<Workflow> {
     const workflow = await this.readAndMigrate(this.file(projectId, id));
+    workflow.deliveries = this.mergeDeliveries(
+      workflow.deliveries,
+      await this.readDeliveryRecords(projectId, id),
+    );
     workflow.cancellationRequestedAt =
       (await this.cancellationTime(projectId, id)) ??
       workflow.cancellationRequestedAt;
@@ -215,7 +233,66 @@ export class WorkflowStore {
   }
   async recoverable(projectId: string) {
     return (await this.list(projectId)).filter(
-      (workflow) => !isTerminal(workflow.state),
+      (workflow) =>
+        !isTerminal(workflow.state) ||
+        this.hasIncompleteApprovedDelivery(workflow),
+    );
+  }
+
+  private hasIncompleteApprovedDelivery(workflow: Workflow): boolean {
+    return (
+      workflow.state === "APPROVED" &&
+      workflow.worktrees.some(
+        (worktree) =>
+          !workflow.deliveries.some(
+            (delivery) =>
+              delivery.repositoryId === worktree.repositoryId &&
+              delivery.taskId === worktree.taskId,
+          ),
+      )
+    );
+  }
+
+  private mergeDeliveries(
+    existing: Workflow["deliveries"],
+    incoming: Workflow["deliveries"],
+  ): Workflow["deliveries"] {
+    const merged = new Map(
+      existing.map((delivery) => [
+        `${delivery.repositoryId}:${delivery.taskId}`,
+        delivery,
+      ]),
+    );
+    for (const delivery of incoming) {
+      merged.set(`${delivery.repositoryId}:${delivery.taskId}`, delivery);
+    }
+    return [...merged.values()];
+  }
+
+  private async readDeliveryRecords(
+    projectId: string,
+    id: string,
+  ): Promise<Delivery[]> {
+    let entries: string[];
+    try {
+      entries = await readdir(this.deliveryDirectory(projectId, id));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    return Promise.all(
+      entries
+        .filter((entry) => entry.endsWith(".json"))
+        .map(async (entry) =>
+          DeliverySchema.parse(
+            JSON.parse(
+              await readFile(
+                path.join(this.deliveryDirectory(projectId, id), entry),
+                "utf8",
+              ),
+            ),
+          ),
+        ),
     );
   }
   private async readAndMigrate(file: string): Promise<Workflow> {

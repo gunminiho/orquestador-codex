@@ -106,7 +106,7 @@ test("runner advances all executable states", async () => {
   const result = await runner.runUntilPauseOrTerminal(
     await engine.create("project", "x", "loop"),
   );
-  assert.equal(result.state, "APPROVED");
+  assert.equal(result.state, "FINALIZING_DELIVERY");
 });
 test("rate limit remains paused and ids are safe", async () => {
   const root = await fixture();
