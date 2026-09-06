@@ -16,7 +16,8 @@ export class RateLimitScheduler {
       const snapshots = [limits.rateLimits, ...Object.values(limits.rateLimitsByLimitId ?? {})].filter((snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== undefined && snapshot !== null);
       if (!snapshots.some((snapshot) => snapshot.rateLimitReachedType !== null)) return this.engine.resumePaused(current);
       const attempts = (current.rateLimit?.attempts ?? 0) + 1;
-      const resetAt = snapshots.flatMap((snapshot) => [snapshot.primary?.resetsAt, snapshot.secondary?.resetsAt]).filter((value): value is number => value !== null && value !== undefined && value > this.now()).sort((a, b) => a - b)[0];
+      // App Server exposes Unix seconds; JavaScript clocks and timers use milliseconds.
+      const resetAt = snapshots.flatMap((snapshot) => [snapshot.primary?.resetsAt, snapshot.secondary?.resetsAt]).filter((value): value is number => value !== null && value !== undefined).map((seconds) => seconds * 1_000).filter((milliseconds) => milliseconds > this.now()).sort((a, b) => a - b)[0];
       const fallback = Math.min(300_000, 5_000 * 2 ** Math.min(attempts - 1, 6));
       const delay = resetAt ? Math.min(300_000, Math.max(1_000, resetAt - this.now())) : fallback;
       current = await this.engine.updateRateLimit(current, limits, new Date(this.now() + delay).toISOString(), attempts);
