@@ -1,0 +1,26 @@
+{
+  "name": "codex-orchestrator",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "tsx --test src/**/*.test.ts",
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "project:add": "tsx src/cli/project-add.ts",
+    "project:list": "tsx src/cli/project-list.ts",
+    "project:remove": "tsx src/cli/project-remove.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

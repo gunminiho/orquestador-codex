@@ -1,0 +1,1 @@
+{"version":3,"file":"ItemStartedNotification.d.ts","sourceRoot":"","sources":["ItemStartedNotification.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,UAAU,EAAE,MAAM,cAAc,CAAC;AAE/C,MAAM,MAAM,uBAAuB,GAAG;IAAE,IAAI,EAAE,UAAU,CAAC;IAAC,QAAQ,EAAE,MAAM,CAAC;IAAC,MAAM,EAAE,MAAM,CAAC;IAC3F;;OAEG;IACH,WAAW,EAAE,MAAM,CAAC;CAAE,CAAC"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"ThreadRevertResponse.d.ts","sourceRoot":"","sources":["ThreadRevertResponse.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,MAAM,EAAE,MAAM,UAAU,CAAC;AAEvC,MAAM,MAAM,oBAAoB,GAAG;IACnC;;;OAGG;IACH,MAAM,EAAE,MAAM,CAAC;IACf;;;;;OAKG;IACH,oBAAoB,EAAE,MAAM,GAAG,IAAI,CAAC;IACpC;;;;;OAKG;IACH,oBAAoB,EAAE,MAAM,GAAG,IAAI,CAAC;CAAE,CAAC"}

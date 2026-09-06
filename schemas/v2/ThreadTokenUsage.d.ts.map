@@ -1,0 +1,1 @@
+{"version":3,"file":"ThreadTokenUsage.d.ts","sourceRoot":"","sources":["ThreadTokenUsage.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,mBAAmB,EAAE,MAAM,uBAAuB,CAAC;AAEjE,MAAM,MAAM,gBAAgB,GAAG;IAAE,KAAK,EAAE,mBAAmB,CAAC;IAAC,IAAI,EAAE,mBAAmB,CAAC;IAAC,kBAAkB,EAAE,MAAM,GAAG,IAAI,CAAC;CAAE,CAAC"}

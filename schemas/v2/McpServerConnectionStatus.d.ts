@@ -1,0 +1,2 @@
+export type McpServerConnectionStatus = "notStarted" | "starting" | "connected" | "authenticationRequired" | "failed" | "cancelled" | "disabled";
+//# sourceMappingURL=McpServerConnectionStatus.d.ts.map

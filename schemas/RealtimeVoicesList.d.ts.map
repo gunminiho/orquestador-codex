@@ -1,0 +1,1 @@
+{"version":3,"file":"RealtimeVoicesList.d.ts","sourceRoot":"","sources":["RealtimeVoicesList.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,iBAAiB,CAAC;AAErD,MAAM,MAAM,kBAAkB,GAAG;IAAE,EAAE,EAAE,KAAK,CAAC,aAAa,CAAC,CAAC;IAAC,EAAE,EAAE,KAAK,CAAC,aAAa,CAAC,CAAC;IAAC,SAAS,EAAE,aAAa,CAAC;IAAC,SAAS,EAAE,aAAa,CAAC;CAAE,CAAC"}

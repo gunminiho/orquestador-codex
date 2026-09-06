@@ -1,0 +1,1 @@
+{"version":3,"file":"ThreadGoalUpdatedNotification.d.ts","sourceRoot":"","sources":["ThreadGoalUpdatedNotification.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,UAAU,EAAE,MAAM,cAAc,CAAC;AAE/C,MAAM,MAAM,6BAA6B,GAAG;IAAE,QAAQ,EAAE,MAAM,CAAC;IAAC,MAAM,EAAE,MAAM,GAAG,IAAI,CAAC;IAAC,IAAI,EAAE,UAAU,CAAC;CAAE,CAAC"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"OverriddenMetadata.d.ts","sourceRoot":"","sources":["OverriddenMetadata.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,yBAAyB,CAAC;AACzD,OAAO,KAAK,EAAE,mBAAmB,EAAE,MAAM,uBAAuB,CAAC;AAEjE,MAAM,MAAM,kBAAkB,GAAG;IAAE,OAAO,EAAE,MAAM,CAAC;IAAC,eAAe,EAAE,mBAAmB,CAAC;IAAC,cAAc,EAAE,SAAS,CAAC;CAAE,CAAC"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"WindowsSandboxSetupCompletedNotification.d.ts","sourceRoot":"","sources":["WindowsSandboxSetupCompletedNotification.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,uBAAuB,EAAE,MAAM,2BAA2B,CAAC;AAEzE,MAAM,MAAM,wCAAwC,GAAG;IAAE,IAAI,EAAE,uBAAuB,CAAC;IAAC,OAAO,EAAE,OAAO,CAAC;IAAC,KAAK,EAAE,MAAM,GAAG,IAAI,CAAC;CAAE,CAAC"}

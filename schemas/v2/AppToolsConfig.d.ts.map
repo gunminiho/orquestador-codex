@@ -1,0 +1,1 @@
+{"version":3,"file":"AppToolsConfig.d.ts","sourceRoot":"","sources":["AppToolsConfig.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,eAAe,EAAE,MAAM,mBAAmB,CAAC;AAEzD,MAAM,MAAM,cAAc,GAAG;KAAG,GAAG,IAAI,MAAM,CAAC,CAAC,EAAE;QAAE,OAAO,EAAE,OAAO,GAAG,IAAI,CAAC;QAAC,aAAa,EAAE,eAAe,GAAG,IAAI,CAAC;KAAE;CAAE,CAAC"}

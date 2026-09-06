@@ -1,0 +1,1 @@
+{"version":3,"file":"WindowsSandboxSetupStartParams.d.ts","sourceRoot":"","sources":["WindowsSandboxSetupStartParams.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,eAAe,EAAE,MAAM,oBAAoB,CAAC;AAC1D,OAAO,KAAK,EAAE,uBAAuB,EAAE,MAAM,2BAA2B,CAAC;AAEzE,MAAM,MAAM,8BAA8B,GAAG;IAAE,IAAI,EAAE,uBAAuB,CAAC;IAAC,GAAG,CAAC,EAAE,eAAe,GAAG,IAAI,CAAC;CAAE,CAAC"}

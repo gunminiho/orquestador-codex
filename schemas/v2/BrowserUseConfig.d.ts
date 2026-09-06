@@ -1,0 +1,9 @@
+import type { BrowserUseOriginPolicyConfig } from "./BrowserUseOriginPolicyConfig";
+export type BrowserUseConfig = {
+    allow_history_access: boolean | null;
+    default_origin_policy: BrowserUseOriginPolicyConfig | null;
+    origins: {
+        [key in string]?: BrowserUseOriginPolicyConfig;
+    } | null;
+};
+//# sourceMappingURL=BrowserUseConfig.d.ts.map

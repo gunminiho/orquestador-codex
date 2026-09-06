@@ -1,0 +1,1 @@
+{"version":3,"file":"FileChangePatchUpdatedNotification.d.ts","sourceRoot":"","sources":["FileChangePatchUpdatedNotification.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,gBAAgB,EAAE,MAAM,oBAAoB,CAAC;AAE3D,MAAM,MAAM,kCAAkC,GAAG;IAAE,QAAQ,EAAE,MAAM,CAAC;IAAC,MAAM,EAAE,MAAM,CAAC;IAAC,MAAM,EAAE,MAAM,CAAC;IAAC,OAAO,EAAE,KAAK,CAAC,gBAAgB,CAAC,CAAC;CAAE,CAAC"}

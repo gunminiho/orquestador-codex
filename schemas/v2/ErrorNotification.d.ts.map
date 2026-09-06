@@ -1,0 +1,1 @@
+{"version":3,"file":"ErrorNotification.d.ts","sourceRoot":"","sources":["ErrorNotification.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,aAAa,CAAC;AAE7C,MAAM,MAAM,iBAAiB,GAAG;IAAE,KAAK,EAAE,SAAS,CAAC;IAAC,SAAS,EAAE,OAAO,CAAC;IAAC,QAAQ,EAAE,MAAM,CAAC;IAAC,MAAM,EAAE,MAAM,CAAC;CAAE,CAAC"}

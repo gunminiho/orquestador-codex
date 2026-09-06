@@ -1,0 +1,1 @@
+{"version":3,"file":"AccountUpdatedNotification.d.ts","sourceRoot":"","sources":["AccountUpdatedNotification.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,QAAQ,EAAE,MAAM,aAAa,CAAC;AAC5C,OAAO,KAAK,EAAE,QAAQ,EAAE,MAAM,aAAa,CAAC;AAE5C,MAAM,MAAM,0BAA0B,GAAG;IAAE,QAAQ,EAAE,QAAQ,GAAG,IAAI,CAAC;IAAC,QAAQ,EAAE,QAAQ,GAAG,IAAI,CAAC;CAAE,CAAC"}
