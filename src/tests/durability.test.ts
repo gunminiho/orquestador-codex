@@ -80,6 +80,68 @@ test("atomic orchestrator-state persistence survives concurrent writes", async (
     0,
   );
 });
+test("independent state stores merge concurrent project and role thread updates", async () => {
+  const root = await fixture();
+  const first = new OrchestratorStateStore(root);
+  const second = new OrchestratorStateStore(root);
+  const staleFirst = await first.load();
+  const staleSecond = await second.load();
+  await Promise.all([
+    first.saveAgent(staleFirst, "project-a", "architect", {
+      threadId: "thread-a",
+    }),
+    second.saveAgent(staleSecond, "project-b", "backend", {
+      threadId: "thread-b",
+    }),
+    first.saveAgent(staleFirst, "project-a", "frontend", {
+      threadId: "thread-a-ui",
+    }),
+  ]);
+  const state = await new OrchestratorStateStore(root).load();
+  assert.equal(
+    state.projects["project-a"]!.agents.architect!.threadId,
+    "thread-a",
+  );
+  assert.equal(
+    state.projects["project-a"]!.agents.frontend!.threadId,
+    "thread-a-ui",
+  );
+  assert.equal(
+    state.projects["project-b"]!.agents.backend!.threadId,
+    "thread-b",
+  );
+});
+test("fifty concurrent stale snapshots preserve every logically independent state update", async () => {
+  const root = await fixture();
+  const stores = [
+    new OrchestratorStateStore(root),
+    new OrchestratorStateStore(root),
+  ];
+  const snapshots = await Promise.all(stores.map((store) => store.load()));
+  const updates = Array.from({ length: 50 }, (_, index) => {
+    const projectId = `project-${index % 10}`;
+    const role = (["architect", "backend", "frontend"] as const)[
+      Math.floor(index / 10) % 3
+    ]!;
+    const threadId = `${projectId}-${role}`;
+    return stores[index % stores.length]!.saveAgent(
+      snapshots[index % snapshots.length]!,
+      projectId,
+      role,
+      { threadId },
+    );
+  });
+  await Promise.all(updates);
+  const state = await new OrchestratorStateStore(root).load();
+  for (let project = 0; project < 10; project += 1) {
+    for (const role of ["architect", "backend", "frontend"] as const) {
+      assert.equal(
+        state.projects[`project-${project}`]!.agents[role]!.threadId,
+        `project-${project}-${role}`,
+      );
+    }
+  }
+});
 test("legacy orchestrator threads migrate with backup", async () => {
   const root = await fixture();
   await mkdir(path.join(root, ".orchestrator"));

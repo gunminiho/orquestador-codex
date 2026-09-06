@@ -10,7 +10,17 @@ const project = value("--project");
 const id = value("--workflow");
 if (!command || !project)
   throw new Error("Usage: workflow:<action> --project <id>");
-if (!["list", "show", "start", "resume", "answer", "cancel"].includes(command))
+if (
+  ![
+    "list",
+    "show",
+    "start",
+    "resume",
+    "answer",
+    "cancel",
+    "integrate",
+  ].includes(command)
+)
   throw new Error(`Unknown workflow command: ${command}`);
 if (command === "list")
   console.log(
@@ -46,8 +56,11 @@ else if (command === "show") {
         workflow = await runtime.engine.answerOwnerInput(workflow, answer);
       } else if (command === "cancel")
         workflow = await runtime.cancel(workflow.id);
+      else if (command === "integrate")
+        workflow = await runtime.integrate(workflow.id);
     }
-    if (command !== "cancel") workflow = await runtime.execute(workflow.id);
+    if (command !== "cancel" && command !== "integrate")
+      workflow = await runtime.execute(workflow.id);
     console.log(JSON.stringify(workflow, null, 2));
   } finally {
     await runtime.stop();

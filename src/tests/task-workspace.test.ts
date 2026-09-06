@@ -135,7 +135,7 @@ test("correction includes requiredChanges findings validationRequired and reuses
     await readFile(path.join(f.repo, "modified.txt"), "utf8"),
     "original\n",
   );
-  await workspace.cleanup(workflow);
+  await workspace.cleanup(await workspace.finalizeApproved(workflow));
 });
 
 for (const hybrid of [false, true])

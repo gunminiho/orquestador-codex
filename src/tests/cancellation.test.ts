@@ -109,6 +109,45 @@ test("concurrent cancellation requests persist one complete intent", async () =>
   );
   assert.equal(new Set(requests.map((w) => w.cancellationRequestedAt)).size, 1);
 });
+test("same-workflow cancellation deduplicates the cleanup operation", async () => {
+  const { store, engine, workflow } = await fixture();
+  let cleanups = 0;
+  const cancellation = new WorkflowCancellation(
+    store,
+    engine,
+    { interruptTurn: async () => ({}) },
+    async () => {
+      cleanups += 1;
+    },
+  );
+  const [first, second] = await Promise.all([
+    cancellation.cancel("p", workflow.id),
+    cancellation.cancel("p", workflow.id),
+  ]);
+  assert.equal(first.id, workflow.id);
+  assert.equal(second.id, workflow.id);
+  assert.equal(cleanups, 1);
+});
+test("different workflow cancellations remain independent", async () => {
+  const { store, engine, workflow } = await fixture();
+  const other = await engine.create("p", "other task");
+  const cleaned: string[] = [];
+  const cancellation = new WorkflowCancellation(
+    store,
+    engine,
+    { interruptTurn: async () => ({}) },
+    async (current) => {
+      cleaned.push(current.id);
+    },
+  );
+  const [first, second] = await Promise.all([
+    cancellation.cancel("p", workflow.id),
+    cancellation.cancel("p", other.id),
+  ]);
+  assert.equal(first.id, workflow.id);
+  assert.equal(second.id, other.id);
+  assert.deepEqual(new Set(cleaned), new Set([workflow.id, other.id]));
+});
 test("late error cannot replace cancelled state", async () => {
   const { store, engine, workflow } = await fixture();
   await engine.cancel(workflow);

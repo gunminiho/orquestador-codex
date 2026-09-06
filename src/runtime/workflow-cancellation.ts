@@ -5,7 +5,7 @@ import { isTerminal, type Workflow } from "../workflows/workflow-schema";
 
 /** Cancellation intent is durable before any interrupt or cleanup side effect. */
 export class WorkflowCancellation {
-  private pending: Promise<Workflow> | null = null;
+  private readonly pending = new Map<string, Promise<Workflow>>();
   constructor(
     private readonly store: WorkflowStore,
     private readonly engine: WorkflowEngine,
@@ -13,12 +13,15 @@ export class WorkflowCancellation {
     private readonly cleanup: (workflow: Workflow) => Promise<void>,
   ) {}
   async cancel(projectId: string, workflowId: string): Promise<Workflow> {
-    if (this.pending) return this.pending;
-    this.pending = this.perform(projectId, workflowId);
+    const key = `${projectId}:${workflowId}`;
+    const existing = this.pending.get(key);
+    if (existing) return existing;
+    const operation = this.perform(projectId, workflowId);
+    this.pending.set(key, operation);
     try {
-      return await this.pending;
+      return await operation;
     } finally {
-      this.pending = null;
+      if (this.pending.get(key) === operation) this.pending.delete(key);
     }
   }
   private async perform(

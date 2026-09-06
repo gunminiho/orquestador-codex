@@ -161,5 +161,5 @@ for (const changes of [true, false])
     assert.equal(workflow.attempts.at(-1)!.threadId, "same-thread");
     assert.equal(workflow.attempts.at(-1)!.attemptId === first, changes);
     assert.equal(workflow.ownershipValidations.at(-1)!.source, "git");
-    await workspace.cleanup(workflow);
+    await workspace.cleanup(await workspace.finalizeApproved(workflow));
   });

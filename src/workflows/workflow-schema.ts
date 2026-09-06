@@ -79,11 +79,36 @@ const WorktreeSchema = z.object({
   workflowId: z.string(),
   taskId: z.string(),
   attemptId: z.string(),
+  originalBranch: z.string().default(""),
   createdByOrchestrator: z.literal(true),
+});
+export const DeliverySchema = z.object({
+  repositoryId: z.string(),
+  taskId: z.string(),
+  baseCommitSha: z.string(),
+  resultCommitSha: z.string(),
+  branch: z.string(),
+  originalRepositoryRoot: z.string(),
+  originalBranch: z.string(),
+  status: z.enum(["READY_TO_INTEGRATE", "INTEGRATED", "OWNER_ACTION_REQUIRED"]),
+  finalizedAt: z.string(),
+  integratedAt: z.string().nullable(),
+  integrationReason: z.string().nullable(),
+});
+export type Delivery = z.infer<typeof DeliverySchema>;
+const ManualReconciliationSchema = z.object({
+  reason: z.string(),
+  repositoryId: z.string(),
+  physicalRoot: z.string(),
+  ownerWorkflowId: z.string(),
+  ownerTaskId: z.string(),
+  detectedAt: z.string(),
 });
 export const WorkflowSchema = z.object({
   attempts: z.array(ImplementationAttemptSchema).default([]),
   worktrees: z.array(WorktreeSchema).default([]),
+  deliveries: z.array(DeliverySchema).default([]),
+  manualReconciliation: ManualReconciliationSchema.nullable().default(null),
   cancellationRequestedAt: z.string().nullable().default(null),
   activeTurn: z
     .object({
@@ -262,6 +287,8 @@ export function newWorkflow(
   return {
     attempts: [],
     worktrees: [],
+    deliveries: [],
+    manualReconciliation: null,
     cancellationRequestedAt: null,
     activeTurn: null,
     version: 2,

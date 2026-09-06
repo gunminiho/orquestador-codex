@@ -5,6 +5,7 @@ import type {
   TaskReport,
 } from "../protocol/team-messages";
 import { classifyCodexError } from "../codex/codex-error";
+import { StaleForeignRepositoryLockError } from "./repository-lock";
 import type { OwnershipValidation } from "../projects/ownership";
 import { WorkflowStore } from "./workflow-store";
 import {
@@ -171,6 +172,24 @@ export class WorkflowEngine {
         a.status === "RUNNING" ? { ...a, status: "INTERRUPTED" } : a,
       ),
     };
+    if (error instanceof StaleForeignRepositoryLockError) {
+      return this.transition(
+        {
+          ...workflow,
+          lastError: error.message,
+          manualReconciliation: {
+            reason: "STALE_FOREIGN_REPOSITORY_LOCK",
+            repositoryId: error.lease.repositoryId,
+            physicalRoot: error.lease.physicalRoot,
+            ownerWorkflowId: error.lease.workflowId,
+            ownerTaskId: error.lease.taskId,
+            detectedAt: new Date().toISOString(),
+          },
+        },
+        "PAUSED_MANUAL",
+        "STALE_FOREIGN_REPOSITORY_LOCK",
+      );
+    }
     const classified = classifyCodexError(error);
     const now = new Date();
     if (classified.kind === "RATE_LIMIT") {

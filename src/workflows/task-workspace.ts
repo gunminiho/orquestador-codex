@@ -1,10 +1,10 @@
-import path from "node:path";
 import { createHash } from "node:crypto";
+import path from "node:path";
 import { RepositoryLock, type RepositoryLease } from "./repository-lock";
 import { OwnershipVerifier } from "../projects/ownership";
 import { TopologyService, isPathWithin } from "../projects/project-topology";
 import { GitWorktreeManager } from "./git-worktree-manager";
-import type { Workflow } from "./workflow-schema";
+import { type Delivery, type Workflow } from "./workflow-schema";
 import { WorkflowStore } from "./workflow-store";
 
 /** Maps repository identities to isolated task roots for every developer turn. */
@@ -12,6 +12,7 @@ export class TaskWorkspace {
   readonly git: GitWorktreeManager;
   readonly locks: RepositoryLock;
   private readonly leases = new Map<string, RepositoryLease>();
+
   constructor(
     private readonly root: string,
     readonly ownership: OwnershipVerifier,
@@ -35,6 +36,7 @@ export class TaskWorkspace {
     if (workflow.cancellationRequestedAt) throw new Error("Workflow cancelled");
     if (!workflow.assignment)
       throw new Error("Task workspace requires assignment");
+
     const assignment = workflow.assignment;
     const selected = assignment.allowedScopes?.length
       ? new Set(assignment.allowedScopes.map((scope) => scope.repositoryId))
@@ -42,20 +44,22 @@ export class TaskWorkspace {
           this.ownership.topology.topology.repositories.map((repo) => repo.id),
         );
     const repositories = [];
+
     for (const repository of this.ownership.topology.topology.repositories) {
       if (!selected.has(repository.id)) continue;
       if (
         (await this.store.get(workflow.projectId, workflow.id))
           .cancellationRequestedAt
-      )
+      ) {
         throw new Error("Workflow cancelled");
+      }
+
       let worktree = workflow.worktrees.find(
         (item) =>
           item.repositoryId === repository.id &&
           item.taskId === assignment.taskId,
       );
       if (!worktree) {
-        // The task ID determines the resource identity independently of retries.
         const resourceId = createHash("sha256")
           .update(assignment.taskId)
           .digest("hex")
@@ -76,6 +80,7 @@ export class TaskWorkspace {
           await this.store.save(workflow);
         }
       }
+
       if (!worktree) {
         const lease = await this.locks.acquire({
           projectId: workflow.projectId,
@@ -92,6 +97,7 @@ export class TaskWorkspace {
         root: worktree?.worktreePath ?? repository.root,
       });
     }
+
     if (!repositories.length)
       throw new Error("Assignment has no configured repositories");
     const ownership = new OwnershipVerifier(
@@ -119,6 +125,7 @@ export class TaskWorkspace {
           path.relative(original.root, requestedCwd),
         );
     }
+
     const baselines = await ownership.captureBaseline();
     for (const baseline of baselines) {
       const worktree = workflow.worktrees.find(
@@ -131,7 +138,7 @@ export class TaskWorkspace {
         baseline.worktreePath = worktree.worktreePath;
       } else {
         const persisted = workflow.baselines.find(
-          (b) => b.repositoryId === baseline.repositoryId,
+          (item) => item.repositoryId === baseline.repositoryId,
         );
         if (persisted) baseline.files = persisted.files;
       }
@@ -148,27 +155,167 @@ export class TaskWorkspace {
 
   async recordAttempt(workflow: Workflow, attemptId: string): Promise<void> {
     for (const [id, lease] of this.leases) {
-      if (lease.workflowId === workflow.id)
+      if (lease.workflowId === workflow.id) {
         this.leases.set(id, await this.locks.acquire({ ...lease, attemptId }));
+      }
     }
   }
 
+  /**
+   * Turns reviewed task work into an auditable result commit before any approved
+   * worktree is removable. Every delivery is persisted independently so a crash
+   * cannot make an approved result unreachable.
+   */
+  async finalizeApproved(workflow: Workflow): Promise<Workflow> {
+    if (workflow.state !== "APPROVED")
+      throw new Error("Only approved work can be finalized");
+    if (!workflow.assignment || !workflow.reports.length) {
+      throw new Error("Approved workflow has no assignment/report to verify");
+    }
+
+    const pending = workflow.worktrees.filter(
+      (worktree) =>
+        !workflow.deliveries.some(
+          (delivery) =>
+            delivery.repositoryId === worktree.repositoryId &&
+            delivery.taskId === worktree.taskId,
+        ),
+    );
+    if (!pending.length) return workflow;
+
+    const verifier = this.verifierForWorktrees(pending);
+    const baselines = pending.map((worktree) => ({
+      repositoryId: worktree.repositoryId,
+      head: worktree.baseCommitSha,
+      files: {},
+      worktreePath: worktree.worktreePath,
+    }));
+    const verification = await verifier.validateTaskDelta(
+      workflow.assignment,
+      workflow.reports.at(-1)!,
+      baselines,
+    );
+    if (!verification.ok) {
+      throw new Error(
+        `Approved delta failed final ownership verification: ${verification.violations.join("; ")}`,
+      );
+    }
+
+    for (const worktree of pending) {
+      const finalized = await this.git.finalizeApproved(worktree);
+      const delivery: Delivery = {
+        repositoryId: worktree.repositoryId,
+        taskId: worktree.taskId,
+        baseCommitSha: finalized.baseCommitSha,
+        resultCommitSha: finalized.resultCommitSha,
+        branch: finalized.branch,
+        originalRepositoryRoot: worktree.originalRepositoryRoot,
+        originalBranch: worktree.originalBranch,
+        status: "READY_TO_INTEGRATE",
+        finalizedAt: new Date().toISOString(),
+        integratedAt: null,
+        integrationReason: null,
+      };
+      workflow = await this.store.saveApprovedDeliveries(
+        workflow.projectId,
+        workflow.id,
+        [delivery],
+      );
+    }
+
+    return workflow;
+  }
+
+  /** Attempts only a clean fast-forward integration; unsafe checkouts stay untouched. */
+  async integrateApproved(workflow: Workflow): Promise<Workflow> {
+    if (workflow.state !== "APPROVED")
+      throw new Error("Only approved workflows can be integrated");
+    for (const delivery of workflow.deliveries) {
+      if (delivery.status === "INTEGRATED") continue;
+      const outcome = await this.git.integrateApproved(delivery);
+      const updated: Delivery = {
+        ...delivery,
+        status: outcome.ok ? "INTEGRATED" : "OWNER_ACTION_REQUIRED",
+        integratedAt: outcome.ok ? new Date().toISOString() : null,
+        integrationReason: outcome.ok ? null : outcome.reason,
+      };
+      workflow = await this.store.saveApprovedDeliveries(
+        workflow.projectId,
+        workflow.id,
+        [updated],
+      );
+    }
+    return workflow;
+  }
+
   async cleanup(workflow: Workflow): Promise<void> {
-    for (const worktree of workflow.worktrees) await this.git.cleanup(worktree);
-    for (const repo of this.ownership.topology.topology.repositories) {
-      if (this.leases.has(repo.id)) continue;
+    const preserveApprovedBranches = workflow.state === "APPROVED";
+    if (preserveApprovedBranches) {
+      const missing = workflow.worktrees.filter(
+        (worktree) =>
+          !workflow.deliveries.some(
+            (delivery) =>
+              delivery.repositoryId === worktree.repositoryId &&
+              delivery.taskId === worktree.taskId,
+          ),
+      );
+      if (missing.length) {
+        throw new Error(
+          "Refusing approved cleanup before delivery metadata is durable",
+        );
+      }
+    }
+
+    for (const worktree of workflow.worktrees) {
+      await this.git.cleanup(worktree, {
+        preserveBranch: preserveApprovedBranches,
+      });
+    }
+    await this.releaseOwnedLeases(workflow);
+  }
+
+  private verifierForWorktrees(
+    worktrees: Workflow["worktrees"],
+  ): OwnershipVerifier {
+    const roots = new Map(
+      worktrees.map((worktree) => [
+        worktree.repositoryId,
+        worktree.worktreePath,
+      ]),
+    );
+    const repositories = this.ownership.topology.topology.repositories
+      .filter((repository) => roots.has(repository.id))
+      .map((repository) => ({
+        ...repository,
+        root: roots.get(repository.id)!,
+      }));
+    return new OwnershipVerifier(
+      new TopologyService({
+        ...this.ownership.topology.topology,
+        repositories,
+      }),
+    );
+  }
+
+  private async releaseOwnedLeases(workflow: Workflow): Promise<void> {
+    for (const repository of this.ownership.topology.topology.repositories) {
+      if (this.leases.has(repository.id)) continue;
       try {
-        const previous = await this.locks.inspect(repo.root);
+        const previous = await this.locks.inspect(repository.root);
         if (previous.workflowId !== workflow.id) continue;
         const lease = await this.locks.acquire(previous);
-        this.leases.set(repo.id, lease);
+        this.leases.set(repository.id, lease);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
     }
-    for (const [id, lease] of this.leases) {
-      if (lease.workflowId === workflow.id && (await this.locks.release(lease)))
-        this.leases.delete(id);
+    for (const [repositoryId, lease] of this.leases) {
+      if (
+        lease.workflowId === workflow.id &&
+        (await this.locks.release(lease))
+      ) {
+        this.leases.delete(repositoryId);
+      }
     }
   }
 }

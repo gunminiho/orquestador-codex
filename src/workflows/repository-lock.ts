@@ -21,6 +21,14 @@ export type RepositoryLease = {
 export class RepositoryBusyError extends Error {
   readonly codexErrorInfo = "serverOverloaded";
 }
+/** A dead foreign owner is an ownership ambiguity, never an App Server retry. */
+export class StaleForeignRepositoryLockError extends Error {
+  constructor(readonly lease: RepositoryLease) {
+    super(
+      `Stale repository lock requires owner action: workflow ${lease.workflowId}, task ${lease.taskId}, root ${lease.physicalRoot}`,
+    );
+  }
+}
 export function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -118,6 +126,9 @@ export class RepositoryLock {
         await handle.close();
         await unlink(claim);
       }
+    }
+    if (this.isDead(existing)) {
+      throw new StaleForeignRepositoryLockError(existing);
     }
     throw new RepositoryBusyError(
       `Repository is locked by workflow ${existing.workflowId}`,

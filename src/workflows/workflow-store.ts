@@ -93,6 +93,41 @@ export class WorkflowStore {
     const temporary = await this.atomicWrite(file, value);
     await atomicReplace(temporary, file);
   }
+
+  /**
+   * Delivery is the only mutable part of an approved workflow. Keeping it in a
+   * narrow store operation prevents late runtime events from replacing a
+   * terminal workflow while still making result commits durable before cleanup.
+   */
+  async saveApprovedDeliveries(
+    projectId: string,
+    id: string,
+    deliveries: Workflow["deliveries"],
+  ): Promise<Workflow> {
+    const latest = await this.get(projectId, id);
+    if (latest.state !== "APPROVED") {
+      throw new Error(
+        "Only an approved workflow can persist delivery metadata",
+      );
+    }
+    const merged = new Map(
+      latest.deliveries.map((delivery) => [
+        `${delivery.repositoryId}:${delivery.taskId}`,
+        delivery,
+      ]),
+    );
+    for (const delivery of deliveries) {
+      merged.set(`${delivery.repositoryId}:${delivery.taskId}`, delivery);
+    }
+    const value = WorkflowSchema.parse({
+      ...latest,
+      deliveries: [...merged.values()],
+      updatedAt: new Date().toISOString(),
+    });
+    const temporary = await this.atomicWrite(this.file(projectId, id), value);
+    await atomicReplace(temporary, this.file(projectId, id));
+    return this.get(projectId, id);
+  }
   private async cancellationTime(
     projectId: string,
     id: string,

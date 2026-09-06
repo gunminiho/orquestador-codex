@@ -97,8 +97,7 @@ export class ProjectRuntime {
     for (;;) {
       let workflow = await this.store.get(this.projectId, workflowId);
       if (isTerminal(workflow.state)) {
-        await this.workspace.cleanup(workflow);
-        return workflow;
+        return this.finalizeTerminal(workflow);
       }
       if (workflow.cancellationRequestedAt) {
         if (workflow.activeTurn?.turnId) await this.lifecycle.start();
@@ -148,7 +147,7 @@ export class ProjectRuntime {
         workflow.state === "PAUSED_TRANSIENT"
       )
         continue;
-      if (isTerminal(workflow.state)) await this.workspace.cleanup(workflow);
+      if (isTerminal(workflow.state)) return this.finalizeTerminal(workflow);
       return workflow;
     }
   }
@@ -179,6 +178,23 @@ export class ProjectRuntime {
     }
     if (workflow.activeTurn?.turnId) await this.lifecycle.start();
     return this.cancellation.cancel(this.projectId, workflowId);
+  }
+
+  async integrate(workflowId: string) {
+    const workflow = await this.store.get(this.projectId, workflowId);
+    return this.workspace.integrateApproved(workflow);
+  }
+
+  private async finalizeTerminal(
+    workflow: Awaited<ReturnType<WorkflowStore["get"]>>,
+  ) {
+    if (workflow.state === "APPROVED") {
+      const delivered = await this.workspace.finalizeApproved(workflow);
+      await this.workspace.cleanup(delivered);
+      return delivered;
+    }
+    await this.workspace.cleanup(workflow);
+    return workflow;
   }
 
   async stop() {

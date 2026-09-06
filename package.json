@@ -22,6 +22,7 @@
     "workflow:start": "tsx src/cli/workflow.ts start",
     "workflow:resume": "tsx src/cli/workflow.ts resume",
     "workflow:cancel": "tsx src/cli/workflow.ts cancel",
+    "workflow:integrate": "tsx src/cli/workflow.ts integrate",
     "workflow:answer": "tsx src/cli/workflow.ts answer"
   },
   "keywords": [],
