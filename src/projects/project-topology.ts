@@ -28,7 +28,10 @@ export const ProjectTopologySchema = z.object({
 export type ProjectTopology = z.infer<typeof ProjectTopologySchema>;
 
 export function normalizeAbsolutePath(input: string): string {
-  return path.resolve(input).replace(/[\\/]+$/, "");
+  const resolved = path.resolve(input).replace(/[\\/]+$/, "");
+  const withoutNamespace =
+    process.platform === "win32" ? resolved.replace(/^\\\\\?\\/, "") : resolved;
+  return comparable(withoutNamespace);
 }
 
 export function toPortablePath(input: string): string {
