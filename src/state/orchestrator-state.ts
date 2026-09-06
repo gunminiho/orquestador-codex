@@ -1,35 +1,22 @@
-import {
-  mkdir,
-  readFile,
-  rename,
-  open,
-  writeFile,
-} from "node:fs/promises";
+import { atomicReplace } from "./atomic-file";
+import { mkdir, readFile, rename, open, writeFile } from "node:fs/promises";
 
 import path from "node:path";
 
-export type AgentRole =
-  | "architect"
-  | "backend"
-  | "frontend";
+export type AgentRole = "architect" | "backend" | "frontend";
 
 export type AgentState = {
   threadId: string;
 };
 
 export type ProjectAgentState = {
-  agents: Partial<
-    Record<AgentRole, AgentState>
-  >;
+  agents: Partial<Record<AgentRole, AgentState>>;
 };
 
 export type OrchestratorState = {
   version: 2;
 
-  projects: Record<
-    string,
-    ProjectAgentState
-  >;
+  projects: Record<string, ProjectAgentState>;
 };
 
 type LegacyOrchestratorState = {
@@ -50,40 +37,26 @@ export class OrchestratorStateStore {
   private readonly file: string;
 
   constructor(rootDirectory: string) {
-    this.directory = path.join(
-      rootDirectory,
-      ".orchestrator",
-    );
+    this.directory = path.join(rootDirectory, ".orchestrator");
 
-    this.file = path.join(
-      this.directory,
-      "state.json",
-    );
+    this.file = path.join(this.directory, "state.json");
   }
 
   async load(): Promise<OrchestratorState> {
     try {
-      const content = await readFile(
-        this.file,
-        "utf8",
-      );
+      const content = await readFile(this.file, "utf8");
 
-      const parsed =
-        JSON.parse(content) as unknown;
+      const parsed = JSON.parse(content) as unknown;
 
       if (this.isV2State(parsed)) {
         return parsed;
       }
 
       if (this.isLegacyState(parsed)) {
-        return this.migrateLegacyState(
-          parsed,
-        );
+        return this.migrateLegacyState(parsed);
       }
 
-      throw new Error(
-        "Unsupported orchestrator state format.",
-      );
+      throw new Error("Unsupported orchestrator state format.");
     } catch (error) {
       if (
         typeof error === "object" &&
@@ -91,29 +64,27 @@ export class OrchestratorStateStore {
         "code" in error &&
         error.code === "ENOENT"
       ) {
-        return structuredClone(
-          EMPTY_STATE,
-        );
+        return structuredClone(EMPTY_STATE);
       }
 
       throw error;
     }
   }
 
-  async save(
-    state: OrchestratorState,
-  ): Promise<void> {
-    await mkdir(
-      this.directory,
-      {
-        recursive: true,
-      },
-    );
+  async save(state: OrchestratorState): Promise<void> {
+    await mkdir(this.directory, {
+      recursive: true,
+    });
 
-    const temporary = `${this.file}.${process.pid}.${Date.now()}.tmp`;
+    const temporary = `${this.file}.${crypto.randomUUID()}.tmp`;
     const handle = await open(temporary, "w");
-    try { await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, "utf8"); await handle.sync(); } finally { await handle.close(); }
-    await rename(temporary, this.file);
+    try {
+      await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await atomicReplace(temporary, this.file);
   }
 
   getProjectState(
@@ -133,47 +104,33 @@ export class OrchestratorStateStore {
     role: AgentRole,
     agent: AgentState,
   ): Promise<void> {
-    const project =
-      state.projects[projectId] ?? {
-        agents: {},
-      };
+    const project = state.projects[projectId] ?? {
+      agents: {},
+    };
 
     project.agents[role] = agent;
 
-    state.projects[projectId] =
-      project;
+    state.projects[projectId] = project;
 
     await this.save(state);
   }
 
-  private isV2State(
-    value: unknown,
-  ): value is OrchestratorState {
-    if (
-      typeof value !== "object" ||
-      value === null
-    ) {
+  private isV2State(value: unknown): value is OrchestratorState {
+    if (typeof value !== "object" || value === null) {
       return false;
     }
 
-    const candidate =
-      value as Record<string, unknown>;
+    const candidate = value as Record<string, unknown>;
 
     return (
       candidate.version === 2 &&
-      typeof candidate.projects ===
-        "object" &&
+      typeof candidate.projects === "object" &&
       candidate.projects !== null
     );
   }
 
-  private isLegacyState(
-    value: unknown,
-  ): value is LegacyOrchestratorState {
-    if (
-      typeof value !== "object" ||
-      value === null
-    ) {
+  private isLegacyState(value: unknown): value is LegacyOrchestratorState {
+    if (typeof value !== "object" || value === null) {
       return false;
     }
 
@@ -183,30 +140,17 @@ export class OrchestratorStateStore {
   private async migrateLegacyState(
     legacy: LegacyOrchestratorState,
   ): Promise<OrchestratorState> {
-    await mkdir(
-      this.directory,
-      {
-        recursive: true,
-      },
-    );
+    await mkdir(this.directory, {
+      recursive: true,
+    });
 
-    const backup = path.join(
-      this.directory,
-      `state.legacy.${Date.now()}.json`,
-    );
+    const backup = path.join(this.directory, `state.legacy.${Date.now()}.json`);
 
-    await rename(
-      this.file,
-      backup,
-    );
+    await rename(this.file, backup);
 
-    console.log(
-      "[STATE] Legacy global-agent state detected.",
-    );
+    console.log("[STATE] Legacy global-agent state detected.");
 
-    console.log(
-      `[STATE] Backup created: ${backup}`,
-    );
+    console.log(`[STATE] Backup created: ${backup}`);
 
     console.log(
       "[STATE] Preserving legacy threads under legacy-unassigned; move them to the registered project before use.",

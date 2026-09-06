@@ -12,6 +12,7 @@ import type { ThreadResumeResponse } from "../../schemas/v2/ThreadResumeResponse
 import {
   CodexAppServerClient,
   type RunTurnResult,
+  type TurnOptions,
 } from "../codex/app-server-client";
 
 const ARCHITECT_INSTRUCTIONS = `
@@ -54,120 +55,104 @@ export class ArchitectAgent {
     private readonly context = "",
   ) {}
 
-  async start(
-  existingThreadId?: string,
-): Promise<{
-  mode: "created" | "resumed";
-  response:
-    | ThreadStartResponse
-    | ThreadResumeResponse;
-}> {
-  if (existingThreadId) {
-    console.log(
-      `[ARCHITECT] Resuming thread ${existingThreadId}...`,
-    );
+  async start(existingThreadId?: string): Promise<{
+    mode: "created" | "resumed";
+    response: ThreadStartResponse | ThreadResumeResponse;
+  }> {
+    if (existingThreadId) {
+      console.log(`[ARCHITECT] Resuming thread ${existingThreadId}...`);
 
-    const response =
-      await this.client.resumeThread({
-        threadId: existingThreadId,
+      try {
+        const response = await this.client.resumeThread({
+          threadId: existingThreadId,
 
-        cwd: this.cwd,
+          cwd: this.cwd,
 
-        developerInstructions:
-          ARCHITECT_INSTRUCTIONS + this.context,
+          developerInstructions: ARCHITECT_INSTRUCTIONS + this.context,
 
-        excludeTurns: true,
-      });
+          excludeTurns: true,
+        });
+
+        this.threadId = response.thread.id;
+
+        return {
+          mode: "resumed",
+          response,
+        };
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !error.message.includes("no rollout found for thread id")
+        )
+          throw error;
+      }
+    }
+
+    console.log("[ARCHITECT] No persisted thread found. Creating one...");
+
+    const params: ThreadStartParams = {
+      cwd: this.cwd,
+
+      developerInstructions: ARCHITECT_INSTRUCTIONS + this.context,
+
+      ephemeral: false,
+    };
+
+    const response = await this.client.startThread(params);
 
     this.threadId = response.thread.id;
 
+    await this.client.runTurn(
+      response.thread.id,
+      "Materialize this persistent thread. Do not inspect files, run commands, or modify anything. Reply ARCHITECT_READY.",
+    );
+
     return {
-      mode: "resumed",
+      mode: "created",
       response,
     };
   }
 
-  console.log(
-    "[ARCHITECT] No persisted thread found. Creating one...",
-  );
-
-  const params: ThreadStartParams = {
-    cwd: this.cwd,
-
-    developerInstructions:
-      ARCHITECT_INSTRUCTIONS + this.context,
-
-    ephemeral: false,
-  };
-
-  const response =
-    await this.client.startThread(params);
-
-  this.threadId = response.thread.id;
-
-  await this.client.runTurn(response.thread.id, "Materialize this persistent thread. Do not inspect files, run commands, or modify anything. Reply ARCHITECT_READY.");
-
-  return {
-    mode: "created",
-    response,
-  };
-}
-
-  async send(
-    message: string,
-  ): Promise<RunTurnResult> {
+  async send(message: string): Promise<RunTurnResult> {
     if (!this.threadId) {
-      throw new Error(
-        "Architect thread has not been started.",
-      );
+      throw new Error("Architect thread has not been started.");
     }
 
-    return this.client.runTurn(
-      this.threadId,
-      message,
-    );
+    return this.client.runTurn(this.threadId, message);
   }
 
-async sendStructured<T>(
-  message: string,
-  schema: ZodType<T>,
-): Promise<{
-  data: T;
-  raw: RunTurnResult;
-}> {
-  if (!this.threadId) {
-    throw new Error(
-      "Architect thread has not been started.",
-    );
-  }
+  async sendStructured<T>(
+    message: string,
+    schema: ZodType<T>,
+    options?: TurnOptions,
+  ): Promise<{
+    data: T;
+    raw: RunTurnResult;
+  }> {
+    if (!this.threadId) {
+      throw new Error("Architect thread has not been started.");
+    }
 
-  const outputSchema =
-    toCodexJsonSchema(schema);
+    const outputSchema = toCodexJsonSchema(schema);
 
-  const raw =
-    await this.client.runTurn(
+    const raw = await this.client.runTurn(
       this.threadId,
       message,
       outputSchema,
+      options,
     );
 
-  const data =
-    parseStructuredOutput(
-      schema,
-      raw.text,
-    );
+    const data = parseStructuredOutput(schema, raw.text);
 
-  return {
-    data,
-    raw,
-  };
-}
+    return {
+      data,
+      raw,
+    };
+  }
 
   getThreadId(): string {
     if (!this.threadId) {
-      throw new Error(
-        "Architect thread has not been started.",
-      );
+      throw new Error("Architect thread has not been started.");
     }
 
     return this.threadId;
