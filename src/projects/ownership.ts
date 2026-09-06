@@ -256,8 +256,9 @@ export class OwnershipVerifier {
     while (true) {
       try {
         await lstat(probe);
+        const repositoryRoot = await realpath(candidate.repository.root);
         const resolved = await realpath(probe);
-        if (!isPathWithin(candidate.repository.root, resolved))
+        if (!isPathWithin(repositoryRoot, resolved))
           throw new Error(
             `Symlink/junction escapes repository root: ${relativePath}`,
           );

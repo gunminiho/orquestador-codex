@@ -121,8 +121,9 @@ export class TopologyService {
     const location = this.repositoryForPath(absolutePath);
     if (!location) throw new Error(`Path is outside configured repositories: ${absolutePath}`);
     try {
+      const repositoryRoot = await realpath(location.repository.root);
       const resolved = await realpath(absolutePath);
-      if (!isPathWithin(location.repository.root, resolved)) throw new Error(`Symlink escapes repository root: ${absolutePath}`);
+      if (!isPathWithin(repositoryRoot, resolved)) throw new Error(`Symlink escapes repository root: ${absolutePath}`);
     } catch (error) {
       if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
