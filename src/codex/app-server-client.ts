@@ -22,6 +22,7 @@ import type { TurnCompletedNotification } from "../../schemas/v2/TurnCompletedNo
 import type { AgentMessageDeltaNotification } from "../../schemas/v2/AgentMessageDeltaNotification";
 import type { Turn } from "../../schemas/v2/Turn";
 import type { GetAccountRateLimitsResponse } from "../../schemas/v2/GetAccountRateLimitsResponse";
+import { CodexTurnError } from "./codex-errors";
 
 type RpcId =
   | number
@@ -314,11 +315,7 @@ export class CodexAppServerClient {
     if (
       completed.turn.error
     ) {
-      throw new Error(
-        `Codex turn failed: ${JSON.stringify(
-          completed.turn.error,
-        )}`,
-      );
+      throw new CodexTurnError(completed.turn.error, threadId, turnId);
     }
 
     const finalMessage =

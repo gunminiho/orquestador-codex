@@ -9,7 +9,7 @@ import { WorkflowEngine } from "../workflows/workflow-engine";
 import { WorkflowRunner } from "../workflows/workflow-runner";
 import { WorkflowStore } from "../workflows/workflow-store";
 
-async function fixture() { const root = await mkdtemp(path.join(os.tmpdir(), "orchestrator-")); await mkdir(path.join(root, "web")); return root; }
+async function fixture() { const root = await mkdtemp(path.join(os.tmpdir(), "orchestrator-")); await mkdir(path.join(root, "web", "app"), { recursive: true }); return root; }
 function topology(root: string) { return { version: 1 as const, workspaceRoot: root, repositories: [{ id: "web", root: path.join(root, "web"), metadata: {}, ownership: [{ pattern: "app/**", readableBy: ["architect", "frontend"], writableBy: ["frontend"], architectControlled: false }, { pattern: "**", readableBy: ["architect"], writableBy: [], architectControlled: true }] }], agentWorkspaces: {} }; }
 const assignment = { type: "TASK_ASSIGNMENT" as const, taskId: "t", assignedTo: "frontend" as const, title: "x", objective: "x", context: "", requirements: [], acceptanceCriteria: [], allowedPaths: ["app/**"], forbiddenPaths: [], validationCommands: [], notes: [] };
 const report = { type: "TASK_REPORT" as const, taskId: "t", agent: "frontend" as const, status: "READY_FOR_REVIEW" as const, summary: "x", filesChanged: ["web:app/x.tsx"], testsChanged: [], validations: [], risks: [], blockers: [], notes: [] };

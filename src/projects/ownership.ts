@@ -46,7 +46,14 @@ export class OwnershipVerifier {
       const before = baseline.find((item) => item.repositoryId === repository.id)?.files ?? {};
       try { const { stdout } = await execFileAsync("git", ["-C", repository.root, "status", "--porcelain=v1", "-z"], { windowsHide: true }); for (const file of parsePorcelainZ(stdout)) if (!(file in before)) changed.push(`${repository.id}:${file}`); } catch { /* report-only fallback for non-git projects */ }
     }
-    return this.validateReport(assignment, report, changed.length ? changed : report.filesChanged, changed.length ? "git" : "report");
+    const actual = changed.length ? changed : report.filesChanged;
+    const result = this.validateReport(assignment, report, actual, changed.length ? "git" : "report");
+    for (const raw of actual) {
+      try { const candidate = this.resolveReportedPath(raw); await this.assertSafePath(candidate.repository.id, candidate.relativePath); }
+      catch (error) { result.violations.push(`${raw}: ${error instanceof Error ? error.message : "unsafe path"}`); }
+    }
+    result.ok = result.violations.length === 0;
+    return result;
   }
   private inAssignment(assignment: TaskAssignment, repositoryId: string, relativePath: string, kind: "allowed" | "forbidden"): boolean {
     const scopes = kind === "allowed" ? assignment.allowedScopes : assignment.forbiddenScopes;
