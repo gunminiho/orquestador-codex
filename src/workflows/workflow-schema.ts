@@ -14,7 +14,7 @@ export const WorkflowSchema = z.object({
   phase: z.string().min(1), assignedAgent: z.string().nullable(), assignment: TaskAssignmentSchema.nullable(), reports: z.array(TaskReportSchema), reviews: z.array(ReviewResultSchema),
   retryCount: z.number().int().nonnegative(), threadIds: z.record(z.string(), z.string()), pendingAction: z.string().nullable(),
   ownershipValidations: z.array(z.object({ at: z.string(), ok: z.boolean(), violations: z.array(z.string()), source: z.string() })), validationResults: z.array(z.string()),
-  rateLimit: z.object({ pausedAt: z.string(), retryAfter: z.string().nullable(), snapshot: z.unknown().nullable(), previousState: WorkflowStateSchema.optional(), nextCheckAt: z.string().nullable().optional(), pendingAction: z.string().nullable().optional(), agentRole: z.string().nullable().optional() }).nullable(),
+  rateLimit: z.object({ pausedAt: z.string(), retryAfter: z.string().nullable(), snapshot: z.unknown().nullable(), previousState: WorkflowStateSchema.optional(), nextCheckAt: z.string().nullable().optional(), attempts: z.number().int().nonnegative().optional(), pendingAction: z.string().nullable().optional(), agentRole: z.string().nullable().optional() }).nullable(),
   transient: z.object({ previousState: WorkflowStateSchema, retryAt: z.string(), attempts: z.number().int().nonnegative() }).nullable(),
   ownerInput: z.object({ request: OwnerInputRequestSchema, priorState: WorkflowStateSchema, answer: z.string().nullable() }).nullable(),
   baselines: z.array(BaselineSchema), allowedScopes: z.array(ScopeSchema), forbiddenScopes: z.array(ScopeSchema),
@@ -34,6 +34,7 @@ const allowed: Record<WorkflowState, WorkflowState[]> = {
 for (const state of active) allowed[state] = [...allowed[state], "PAUSED_RATE_LIMIT", "PAUSED_TRANSIENT", "PAUSED_MANUAL"];
 export function isTerminal(state: WorkflowState) { return TERMINAL_WORKFLOW_STATES.has(state); }
 export function transition(workflow: Workflow, state: WorkflowState, detail: string): Workflow {
+  if (isTerminal(workflow.state) && workflow.state !== state) throw new Error(`Terminal workflow cannot transition: ${workflow.state} -> ${state}`);
   if (workflow.state !== state && !allowed[workflow.state].includes(state)) throw new Error(`Invalid workflow transition ${workflow.state} -> ${state}`);
   const now = new Date().toISOString();
   return { ...workflow, state, updatedAt: now, checkpoints: [...workflow.checkpoints, { at: now, action: `${workflow.state}->${state}`, detail }] };
