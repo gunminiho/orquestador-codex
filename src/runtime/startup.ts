@@ -5,6 +5,7 @@ type RecoverableRuntime = {
   store: { recoverable(projectId: string): Promise<Workflow[]> };
   execute(workflowId: string): Promise<Workflow>;
   stop(): Promise<void> | void;
+  shutdown?(): Promise<void> | void;
 };
 type SignalSource = Pick<NodeJS.Process, "once" | "removeListener">;
 
@@ -17,7 +18,7 @@ export async function recoverProjectWorkflows(
   let stopping = false;
   const shutdown = () => {
     stopping = true;
-    void runtime.stop();
+    void (runtime.shutdown?.() ?? runtime.stop());
   };
   signals.once("SIGINT", shutdown);
   signals.once("SIGTERM", shutdown);

@@ -13,6 +13,7 @@ import {
 } from "./workflow-schema";
 import { TaskWorkspace } from "./task-workspace";
 import { readGitDelta } from "./git-worktree-manager";
+import { throwIfShutdown } from "../runtime/shutdown";
 
 /** Each side effect follows a durable checkpoint; recovery reconciles existing implementation. */
 export class WorkflowRunner {
@@ -25,10 +26,14 @@ export class WorkflowRunner {
     private readonly workspace?: TaskWorkspace,
   ) {}
 
-  async runUntilPauseOrTerminal(initial: Workflow): Promise<Workflow> {
+  async runUntilPauseOrTerminal(
+    initial: Workflow,
+    signal?: AbortSignal,
+  ): Promise<Workflow> {
     let current = initial;
     for (;;) {
       current = await this.store.get(current.projectId, current.id);
+      if (signal?.aborted) return current;
       if (
         isTerminal(current.state) ||
         current.cancellationRequestedAt ||
@@ -43,9 +48,10 @@ export class WorkflowRunner {
       )
         return current;
       try {
-        current = await this.step(current);
+        current = await this.step(current, signal);
       } catch (error) {
         current = await this.store.get(current.projectId, current.id);
+        if (signal?.aborted) return current;
         if (isTerminal(current.state) || current.cancellationRequestedAt)
           return current;
         return this.engine.pauseForError(current, error);
@@ -53,12 +59,15 @@ export class WorkflowRunner {
     }
   }
 
-  private async step(workflow: Workflow): Promise<Workflow> {
+  private async step(
+    workflow: Workflow,
+    signal?: AbortSignal,
+  ): Promise<Workflow> {
     switch (workflow.state) {
       case "PENDING":
         return this.engine.transition(workflow, "PLANNING", "Planning started");
       case "PLANNING":
-        return this.plan(workflow);
+        return this.plan(workflow, signal);
       case "ASSIGNED":
         return this.engine.transition(
           workflow,
@@ -66,7 +75,7 @@ export class WorkflowRunner {
           "Developer turn checkpointed",
         );
       case "IMPLEMENTING":
-        return this.implement(workflow);
+        return this.implement(workflow, signal);
       case "READY_FOR_REVIEW":
         return this.engine.transition(
           workflow,
@@ -74,7 +83,7 @@ export class WorkflowRunner {
           "Architect review checkpointed",
         );
       case "REVIEWING":
-        return this.review(workflow);
+        return this.review(workflow, signal);
       case "CHANGES_REQUESTED":
         return this.engine.transition(
           workflow,
@@ -91,10 +100,12 @@ export class WorkflowRunner {
     role: string,
     threadId: string,
     attemptId: string | null,
+    signal?: AbortSignal,
   ): TurnOptions {
     return {
       readOnly: role === "architect",
       beforeStart: async () => {
+        throwIfShutdown(signal);
         const latest = await this.store.get(workflow.projectId, workflow.id);
         if (isTerminal(latest.state) || latest.cancellationRequestedAt)
           throw new Error("Workflow cancelled");
@@ -111,6 +122,7 @@ export class WorkflowRunner {
         });
       },
       onStarted: async (thread, turnId) => {
+        throwIfShutdown(signal);
         const latest = await this.store.get(workflow.projectId, workflow.id);
         if (isTerminal(latest.state) || latest.cancellationRequestedAt)
           throw new Error("Workflow cancelled");
@@ -132,7 +144,10 @@ export class WorkflowRunner {
     };
   }
 
-  private async plan(workflow: Workflow): Promise<Workflow> {
+  private async plan(
+    workflow: Workflow,
+    signal?: AbortSignal,
+  ): Promise<Workflow> {
     const answer = workflow.ownerInput?.answer
       ? `\nOwner answer: ${workflow.ownerInput.answer}`
       : "";
@@ -141,14 +156,20 @@ export class WorkflowRunner {
       "architect",
       this.architect.getThreadId(),
       null,
+      signal,
     );
+    throwIfShutdown(signal);
     const response = await this.architect.sendStructured(
       `Create exactly one TASK_ASSIGNMENT or OWNER_INPUT_REQUIRED for workflow ${workflow.id}. Owner request: ${workflow.ownerRequest}${answer}`,
       ArchitectActionSchema,
       options,
     );
     workflow = await this.store.get(workflow.projectId, workflow.id);
-    if (isTerminal(workflow.state) || workflow.cancellationRequestedAt)
+    if (
+      signal?.aborted ||
+      isTerminal(workflow.state) ||
+      workflow.cancellationRequestedAt
+    )
       return workflow;
     workflow.activeTurn = null;
     if (response.data.type === "OWNER_INPUT_REQUIRED")
@@ -158,7 +179,10 @@ export class WorkflowRunner {
     return this.engine.assign(workflow, response.data);
   }
 
-  private async implement(workflow: Workflow): Promise<Workflow> {
+  private async implement(
+    workflow: Workflow,
+    signal?: AbortSignal,
+  ): Promise<Workflow> {
     if (!workflow.assignment)
       throw new Error("Implementation has no assignment");
     const assigned = workflow.assignment;
@@ -186,7 +210,9 @@ export class WorkflowRunner {
       );
     }
     let attemptId = previous?.attemptId ?? (crypto.randomUUID() as string);
+    throwIfShutdown(signal);
     const prepared = await this.workspace?.prepare(workflow, attemptId);
+    throwIfShutdown(signal);
     workflow = prepared?.workflow ?? workflow;
     const verifier = prepared?.ownership ?? this.ownership;
     const baseline = prepared
@@ -281,11 +307,13 @@ export class WorkflowRunner {
       assigned.assignedTo,
       threadId,
       attemptId,
+      signal,
     );
     if (prepared) {
       options.cwd = prepared.cwd;
       options.writableRoots = prepared.roots;
     }
+    throwIfShutdown(signal);
     const report = await this.router.routeTask(
       {
         ...assigned,
@@ -294,7 +322,11 @@ export class WorkflowRunner {
       options,
     );
     workflow = await this.store.get(workflow.projectId, workflow.id);
-    if (isTerminal(workflow.state) || workflow.cancellationRequestedAt)
+    if (
+      signal?.aborted ||
+      isTerminal(workflow.state) ||
+      workflow.cancellationRequestedAt
+    )
       return workflow;
     const verification = await verifier.validateTaskDelta(
       assigned,
@@ -322,7 +354,10 @@ export class WorkflowRunner {
     );
   }
 
-  private async review(workflow: Workflow): Promise<Workflow> {
+  private async review(
+    workflow: Workflow,
+    signal?: AbortSignal,
+  ): Promise<Workflow> {
     if (!workflow.assignment || !workflow.reports.length)
       throw new Error("Review has no report");
     const options = this.turnOptions(
@@ -330,14 +365,20 @@ export class WorkflowRunner {
       "architect",
       this.architect.getThreadId(),
       null,
+      signal,
     );
+    throwIfShutdown(signal);
     const response = await this.architect.sendStructured(
       `Review and return REVIEW_RESULT or OWNER_INPUT_REQUIRED. Task worktrees: ${JSON.stringify(workflow.worktrees)} Assignment: ${JSON.stringify(workflow.assignment)} Report: ${JSON.stringify(workflow.reports.at(-1))}`,
       ArchitectActionSchema,
       options,
     );
     workflow = await this.store.get(workflow.projectId, workflow.id);
-    if (isTerminal(workflow.state) || workflow.cancellationRequestedAt)
+    if (
+      signal?.aborted ||
+      isTerminal(workflow.state) ||
+      workflow.cancellationRequestedAt
+    )
       return workflow;
     workflow.activeTurn = null;
     if (response.data.type === "OWNER_INPUT_REQUIRED")

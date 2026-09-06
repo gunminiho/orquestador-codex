@@ -1,10 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import {
-  RepositoryLock,
-  processAlive,
-  type RepositoryLease,
-} from "../workflows/repository-lock";
+import { processAlive } from "../workflows/repository-lock";
 import { WorkflowCancellation } from "./workflow-cancellation";
 import { CodexLifecycleManager } from "./codex-lifecycle-manager";
 import { TeamRouter } from "../orchestration/team-router";
@@ -18,14 +14,26 @@ import { WorkflowRunner } from "../workflows/workflow-runner";
 import { WorkflowStore } from "../workflows/workflow-store";
 import { TaskWorkspace } from "../workflows/task-workspace";
 import { isTerminal } from "../workflows/workflow-schema";
+import {
+  ProjectExecutionBusyError,
+  ProjectExecutionLock,
+  type ProjectExecutionLease,
+} from "./project-execution-lock";
+import {
+  abortableTimeout,
+  RuntimeShutdownError,
+  sleepUntil,
+  throwIfShutdown,
+} from "./shutdown";
 
 export class ProjectRuntime {
   readonly scheduler: RateLimitScheduler;
   readonly cancellation: WorkflowCancellation;
-  private readonly executionLock = new RepositoryLock(
+  private readonly executionLock = new ProjectExecutionLock(
     () => this.client.processId,
   );
-  private executionLease: RepositoryLease | null = null;
+  private executionLease: ProjectExecutionLease | null = null;
+  private readonly shutdownController = new AbortController();
   get client() {
     return this.lifecycle.client;
   }
@@ -48,16 +56,19 @@ export class ProjectRuntime {
     );
   }
 
-  async execute(workflowId: string) {
+  async execute(
+    workflowId: string,
+    signal: AbortSignal = this.shutdownController.signal,
+  ) {
+    if (signal.aborted) return this.checkpointShutdown(workflowId);
     await mkdir(this.executionRoot, { recursive: true });
-    this.executionLease = await this.executionLock.acquire({
-      projectId: this.projectId,
-      repositoryId: "runtime",
-      physicalRoot: this.executionRoot,
-      workflowId,
-      taskId: "runtime",
-      attemptId: crypto.randomUUID(),
-    });
+    try {
+      this.executionLease = await this.acquireExecutionLease(workflowId, signal);
+    } catch (error) {
+      if (signal.aborted || error instanceof RuntimeShutdownError)
+        return this.checkpointShutdown(workflowId);
+      throw error;
+    }
     let checking = false;
     const watcher = setInterval(() => {
       if (checking) return;
@@ -66,6 +77,7 @@ export class ProjectRuntime {
         .get(this.projectId, workflowId)
         .then(async (workflow) => {
           if (
+            !signal.aborted &&
             workflow.cancellationRequestedAt &&
             !isTerminal(workflow.state) &&
             workflow.activeTurn?.turnId
@@ -84,18 +96,22 @@ export class ProjectRuntime {
         });
     }, 100);
     try {
-      return await this.executeLoop(workflowId);
+      return await this.executeLoop(workflowId, signal);
     } finally {
       clearInterval(watcher);
+      const latest = await this.store.get(this.projectId, workflowId);
+      await this.workspace.releaseExecutionResources(latest);
       if (this.executionLease)
         await this.executionLock.release(this.executionLease);
       this.executionLease = null;
     }
   }
 
-  private async executeLoop(workflowId: string) {
+  private async executeLoop(workflowId: string, signal: AbortSignal) {
     for (;;) {
+      if (signal.aborted) return this.checkpointShutdown(workflowId);
       let workflow = await this.store.get(this.projectId, workflowId);
+      if (signal.aborted) return this.checkpointShutdown(workflowId);
       if (isTerminal(workflow.state)) {
         return this.finalizeTerminal(workflow);
       }
@@ -104,19 +120,35 @@ export class ProjectRuntime {
         return this.cancellation.cancel(this.projectId, workflowId);
       }
       if (workflow.state === "FINALIZING_DELIVERY") {
+        throwIfShutdown(signal);
         return this.finalizeDelivery(workflow);
       }
       try {
         if (workflow.state === "PAUSED_TRANSIENT") {
-          await this.lifecycle.recover(workflow, this.store, this.engine);
+          await this.lifecycle.recover(
+            workflow,
+            this.store,
+            this.engine,
+            undefined,
+            undefined,
+            signal,
+          );
           continue;
         }
-        await this.lifecycle.start();
+        if (workflow.state === "PAUSED_RATE_LIMIT") {
+          await this.scheduler.waitForAvailability(workflow, signal);
+          continue;
+        }
+        throwIfShutdown(signal);
+        await this.lifecycle.start(signal);
+        throwIfShutdown(signal);
         if (this.executionLease)
-          this.executionLease = await this.executionLock.acquire(
-            this.executionLease,
+          this.executionLease = await this.acquireExecutionLease(
+            workflowId,
+            signal,
           );
         if (workflow.activeTurn?.turnId) {
+          throwIfShutdown(signal);
           await this.client.interruptTurn(
             workflow.activeTurn.threadId,
             workflow.activeTurn.turnId,
@@ -133,16 +165,15 @@ export class ProjectRuntime {
           };
           await this.store.save(workflow);
         }
-        if (workflow.state === "PAUSED_RATE_LIMIT") {
-          await this.scheduler.waitForAvailability(workflow);
-          continue;
-        }
-        workflow = await this.runner.runUntilPauseOrTerminal(workflow);
+        workflow = await this.runner.runUntilPauseOrTerminal(workflow, signal);
       } catch (error) {
+        if (signal.aborted || error instanceof RuntimeShutdownError)
+          return this.checkpointShutdown(workflowId);
         workflow = await this.store.get(this.projectId, workflowId);
         if (!isTerminal(workflow.state) && !workflow.cancellationRequestedAt)
           workflow = await this.engine.pauseForError(workflow, error);
       }
+      if (signal.aborted) return this.checkpointShutdown(workflowId);
       if (workflow.cancellationRequestedAt)
         return this.cancellation.cancel(this.projectId, workflowId);
       if (
@@ -163,11 +194,12 @@ export class ProjectRuntime {
       this.projectId,
       workflowId,
     );
+    if (this.shutdownController.signal.aborted) return workflow;
     // A separate CLI process signals the owner through durable intent. Only that
     // process can interrupt its live stdio transport and safely clean its resources.
     for (;;) {
       if (isTerminal(workflow.state)) return workflow;
-      let owner: RepositoryLease | null = null;
+      let owner: ProjectExecutionLease | null = null;
       try {
         owner = await this.executionLock.inspect(this.executionRoot);
       } catch (error) {
@@ -214,6 +246,59 @@ export class ProjectRuntime {
 
   async stop() {
     this.lifecycle.stop();
+  }
+
+  /** Stops this process only; the workflow stays recoverable for the next one. */
+  async shutdown(): Promise<void> {
+    if (!this.shutdownController.signal.aborted)
+      this.shutdownController.abort(new RuntimeShutdownError());
+    this.lifecycle.stop();
+  }
+
+  private async acquireExecutionLease(
+    workflowId: string,
+    signal: AbortSignal,
+  ): Promise<ProjectExecutionLease> {
+    for (;;) {
+      throwIfShutdown(signal);
+      try {
+        return await this.executionLock.acquire({
+          projectId: this.projectId,
+          workflowId,
+          physicalRoot: this.executionRoot,
+        });
+      } catch (error) {
+        if (!(error instanceof ProjectExecutionBusyError)) throw error;
+        await sleepUntil(abortableTimeout, 100, signal);
+      }
+    }
+  }
+
+  private async checkpointShutdown(workflowId: string) {
+    const workflow = await this.store.get(this.projectId, workflowId);
+    if (isTerminal(workflow.state) || workflow.cancellationRequestedAt)
+      return workflow;
+    const now = new Date().toISOString();
+    const checkpoint = {
+      ...workflow,
+      activeTurn: null,
+      attempts: workflow.attempts.map((attempt) =>
+        attempt.status === "RUNNING"
+          ? { ...attempt, status: "INTERRUPTED" as const }
+          : attempt,
+      ),
+      updatedAt: now,
+      checkpoints: [
+        ...workflow.checkpoints,
+        {
+          at: now,
+          action: "shutdown",
+          detail: "Process shutdown checkpointed; resume in a new runtime",
+        },
+      ],
+    };
+    await this.store.save(checkpoint);
+    return this.store.get(this.projectId, workflowId);
   }
 
   static async create(

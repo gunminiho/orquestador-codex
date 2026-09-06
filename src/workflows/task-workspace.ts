@@ -283,6 +283,11 @@ export class TaskWorkspace {
     await this.releaseOwnedLeases(workflow);
   }
 
+  /** Releases only non-Git execution serialization; it never removes task work. */
+  async releaseExecutionResources(workflow: Workflow): Promise<void> {
+    await this.releaseOwnedLeases(workflow);
+  }
+
   private verifierForWorktrees(
     worktrees: Workflow["worktrees"],
   ): OwnershipVerifier {
