@@ -85,6 +85,7 @@ export class TopologyService {
   may(role: Role, repositoryId: string, relativePath: string, action: "read" | "write"): boolean {
     if (role === "architect" && action === "read") return true;
     const rules = this.rulesFor(repositoryId, relativePath);
+    if (action === "write" && role !== "architect" && rules.some((rule) => rule.architectControlled)) return false;
     return rules.some((rule) => (action === "read" ? rule.readableBy : rule.writableBy).includes(role));
   }
 

@@ -70,10 +70,14 @@ export const TaskAssignmentSchema =
         z.string().min(1),
       ),
 
+    // V2 repository-aware scopes remove ambiguity for multi-repository projects.
+    allowedScopes: z.array(z.object({ repositoryId: z.string().min(1), patterns: z.array(z.string().min(1)).min(1) })).optional(),
+
     forbiddenPaths:
       z.array(
         z.string().min(1),
       ),
+    forbiddenScopes: z.array(z.object({ repositoryId: z.string().min(1), patterns: z.array(z.string().min(1)).min(1) })).optional(),
 
     validationCommands:
       z.array(

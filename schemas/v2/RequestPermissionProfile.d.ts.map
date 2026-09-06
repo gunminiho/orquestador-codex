@@ -1,1 +1,0 @@
-{"version":3,"file":"RequestPermissionProfile.d.ts","sourceRoot":"","sources":["RequestPermissionProfile.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,+BAA+B,EAAE,MAAM,mCAAmC,CAAC;AACzF,OAAO,KAAK,EAAE,4BAA4B,EAAE,MAAM,gCAAgC,CAAC;AAEnF,MAAM,MAAM,wBAAwB,GAAG;IAAE,OAAO,EAAE,4BAA4B,GAAG,IAAI,CAAC;IAAC,UAAU,EAAE,+BAA+B,GAAG,IAAI,CAAC;CAAE,CAAC"}

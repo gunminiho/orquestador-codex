@@ -47,12 +47,7 @@ export class TeamRouter {
       result.data,
     );
 
-    if (result.data.status === "READY_FOR_REVIEW" && this.ownership) {
-      const validation = await this.ownership.validateGitDiff(assignment, result.data);
-      if (!validation.ok) {
-        throw new Error(`Ownership verification rejected TASK_REPORT:\n${validation.violations.join("\n")}`);
-      }
-    }
+    // Durable WorkflowRunner owns task-scoped verification and persistence. Router only transports.
 
     console.log(
       `[ROUTER] Task report received: ${result.data.taskId} / ${result.data.status}`,

@@ -1,1 +1,0 @@
-{"version":3,"file":"MisalignmentErrorDetails.d.ts","sourceRoot":"","sources":["MisalignmentErrorDetails.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,iBAAiB,EAAE,MAAM,qBAAqB,CAAC;AAE7D,MAAM,MAAM,wBAAwB,GAAG;IACvC;;OAEG;IACH,SAAS,EAAE,MAAM,GAAG,IAAI,CAAC;IACzB;;OAEG;IACH,mBAAmB,EAAE,MAAM,GAAG,IAAI,CAAC;IACnC;;OAEG;IACH,KAAK,EAAE,iBAAiB,GAAG,IAAI,CAAC;CAAE,CAAC"}

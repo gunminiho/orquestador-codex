@@ -1,1 +1,0 @@
-{"version":3,"file":"PluginSearchResult.d.ts","sourceRoot":"","sources":["PluginSearchResult.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,eAAe,EAAE,MAAM,oBAAoB,CAAC;AAC1D,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,iBAAiB,CAAC;AAErD,MAAM,MAAM,kBAAkB,GAAG;IAAE,MAAM,EAAE,aAAa,CAAC;IAAC,eAAe,EAAE,MAAM,CAAC;IAAC,eAAe,EAAE,eAAe,GAAG,IAAI,CAAC;CAAE,CAAC"}

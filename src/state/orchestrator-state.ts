@@ -2,6 +2,7 @@ import {
   mkdir,
   readFile,
   rename,
+  open,
   writeFile,
 } from "node:fs/promises";
 
@@ -109,15 +110,10 @@ export class OrchestratorStateStore {
       },
     );
 
-    await writeFile(
-      this.file,
-      `${JSON.stringify(
-        state,
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
+    const temporary = `${this.file}.${process.pid}.${Date.now()}.tmp`;
+    const handle = await open(temporary, "w");
+    try { await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, "utf8"); await handle.sync(); } finally { await handle.close(); }
+    await rename(temporary, this.file);
   }
 
   getProjectState(
