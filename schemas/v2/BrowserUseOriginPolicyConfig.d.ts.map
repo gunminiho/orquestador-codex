@@ -1,1 +1,0 @@
-{"version":3,"file":"BrowserUseOriginPolicyConfig.d.ts","sourceRoot":"","sources":["BrowserUseOriginPolicyConfig.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,oBAAoB,EAAE,MAAM,wBAAwB,CAAC;AAEnE,MAAM,MAAM,4BAA4B,GAAG;IAAE,MAAM,EAAE,oBAAoB,GAAG,IAAI,CAAC;IAAC,SAAS,EAAE,oBAAoB,GAAG,IAAI,CAAC;IAAC,OAAO,EAAE,oBAAoB,GAAG,IAAI,CAAC;IAAC,eAAe,EAAE,oBAAoB,GAAG,IAAI,CAAC;CAAE,CAAC"}

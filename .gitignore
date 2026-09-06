@@ -2,3 +2,19 @@ node_modules/
 dist/
 .orchestrator/
 *.log
+.env
+.env.*
+!.env.example
+coverage/
+tmp/
+temp/
+*.tsbuildinfo
+# TypeScript compiler siblings (source remains .ts only).
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+src/**/*.d.ts.map
+schemas/**/*.js
+schemas/**/*.js.map
+schemas/**/*.d.ts
+schemas/**/*.d.ts.map

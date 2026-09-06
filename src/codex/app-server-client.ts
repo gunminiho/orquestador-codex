@@ -1,7 +1,4 @@
-import {
-  spawn,
-  type ChildProcessWithoutNullStreams,
-} from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import readline from "node:readline";
 
@@ -22,10 +19,11 @@ import type { TurnCompletedNotification } from "../../schemas/v2/TurnCompletedNo
 import type { AgentMessageDeltaNotification } from "../../schemas/v2/AgentMessageDeltaNotification";
 import type { Turn } from "../../schemas/v2/Turn";
 import type { GetAccountRateLimitsResponse } from "../../schemas/v2/GetAccountRateLimitsResponse";
+import type { TurnInterruptResponse } from "../../schemas/v2/TurnInterruptResponse";
+import type { TurnInterruptParams } from "../../schemas/v2/TurnInterruptParams";
+import { CodexRpcError, CodexTurnError } from "./codex-errors";
 
-type RpcId =
-  | number
-  | string;
+type RpcId = number | string;
 
 type RpcSuccessResponse = {
   id: RpcId;
@@ -42,24 +40,24 @@ type RpcErrorResponse = {
   };
 };
 
-type RpcResponse =
-  | RpcSuccessResponse
-  | RpcErrorResponse;
+type RpcResponse = RpcSuccessResponse | RpcErrorResponse;
 
 type PendingRequest = {
-  resolve: (
-    value: unknown,
-  ) => void;
+  resolve: (value: unknown) => void;
 
-  reject: (
-    error: Error,
-  ) => void;
+  reject: (error: Error) => void;
 };
 
-type NotificationListener = (
-  notification: ServerNotification,
-) => void;
+type NotificationListener = (notification: ServerNotification) => void;
 
+export type TurnOptions = {
+  timeoutMs?: number;
+  cwd?: string;
+  writableRoots?: string[];
+  readOnly?: boolean;
+  beforeStart?: () => Promise<void>;
+  onStarted?: (threadId: string, turnId: string) => Promise<void>;
+};
 export type RunTurnResult = {
   turnId: string;
   text: string;
@@ -67,367 +65,296 @@ export type RunTurnResult = {
 };
 
 export class CodexAppServerClient {
-  private child:
-    ChildProcessWithoutNullStreams
-    | null = null;
+  private child: ChildProcessWithoutNullStreams | null = null;
 
   private nextRequestId = 1;
+  private transportError: Error | null = null;
+  private readonly turnWaiters = new Map<string, (error: Error) => void>();
+  private readonly retiredTurns = new Set<string>();
+  get processId(): number | null {
+    return this.child?.pid ?? null;
+  }
 
-  private readonly pendingRequests =
-    new Map<
-      RpcId,
-      PendingRequest
-    >();
+  private readonly pendingRequests = new Map<RpcId, PendingRequest>();
 
-  private readonly notificationListeners =
-    new Set<
-      NotificationListener
-    >();
+  private readonly notificationListeners = new Set<NotificationListener>();
 
   private readonly exitListeners = new Set<(error: Error) => void>();
 
-  private readonly completedTurns =
-    new Map<
-      string,
-      TurnCompletedNotification
-    >();
+  private readonly completedTurns = new Map<
+    string,
+    TurnCompletedNotification
+  >();
 
-  private readonly streamedAgentText =
-    new Map<
-      string,
-      string
-    >();
+  private readonly streamedAgentText = new Map<string, string>();
+
+  onExit(listener: (error: Error) => void): () => void {
+    this.exitListeners.add(listener);
+    return () => this.exitListeners.delete(listener);
+  }
 
   async start(): Promise<InitializeResponse> {
     if (this.child) {
-      throw new Error(
-        "Codex App Server is already running.",
-      );
+      throw new Error("Codex App Server is already running.");
     }
 
-    console.log(
-      "[ORCHESTRATOR] Starting Codex App Server...",
-    );
+    console.log("[ORCHESTRATOR] Starting Codex App Server...");
 
-    this.child =
-      this.spawnCodexAppServer();
+    this.transportError = null;
+    this.child = this.spawnCodexAppServer();
 
-    const child =
-      this.child;
+    const child = this.child;
 
-    const rl =
-      readline.createInterface({
-        input: child.stdout,
-        crlfDelay: Infinity,
-      });
+    const rl = readline.createInterface({
+      input: child.stdout,
+      crlfDelay: Infinity,
+    });
 
-    rl.on(
-      "line",
-      (line) => {
-        this.handleServerLine(
-          line,
-        );
-      },
-    );
+    rl.on("line", (line) => {
+      if (this.child !== child) return;
+      this.handleServerLine(line);
+    });
 
-    child.stderr.on(
-      "data",
-      (chunk: Buffer) => {
-        const text =
-          chunk
-            .toString()
-            .trim();
+    child.stderr.on("data", (chunk: Buffer) => {
+      const text = chunk.toString().trim();
 
-        if (text) {
-          console.error(
-            `[CODEX STDERR] ${text}`,
-          );
-        }
-      },
-    );
+      if (text) {
+        console.error(`[CODEX STDERR] ${text}`);
+      }
+    });
 
-    child.on(
-      "exit",
-      (
-        code,
-        signal,
-      ) => {
-        console.log(
-          `[CODEX] App Server exited. code=${String(
-            code,
-          )} signal=${String(
-            signal,
-          )}`,
-        );
-
-        this.rejectAllPendingRequests(
-          new Error(
-            `Codex App Server exited. code=${String(
-              code,
-            )} signal=${String(
-              signal,
-            )}`,
-          ),
-        );
-
-        const error = new Error(`Codex App Server exited. code=${String(code)} signal=${String(signal)}`);
-        for (const listener of this.exitListeners) listener(error);
-
-        this.child = null;
-      },
-    );
-
-    await new Promise<void>(
-      (
-        resolve,
-        reject,
-      ) => {
-        child.once(
-          "spawn",
-          () => {
-            console.log(
-              "[CODEX] Process started.",
-            );
-
-            resolve();
-          },
-        );
-
-        child.once(
-          "error",
-          reject,
-        );
-      },
-    );
-
-    const initializeParams:
-      InitializeParams = {
-        clientInfo: {
-          name:
-            "codex_orchestrator",
-
-          title:
-            "Codex Multi-Agent Orchestrator",
-
-          version:
-            "0.1.0",
-        },
-
-        capabilities: null,
-      };
-
-    console.log(
-      "[CODEX] Sending initialize...",
-    );
-
-    const initializeResponse =
-      await this.request<InitializeResponse>(
-        "initialize",
-        initializeParams,
+    child.on("exit", (code, signal) => {
+      console.log(
+        `[CODEX] App Server exited. code=${String(code)} signal=${String(
+          signal,
+        )}`,
       );
 
-    console.log(
-      "[CODEX] initialize accepted.",
+      if (this.child !== child) return;
+      this.rejectAllPendingRequests(
+        new Error(
+          `Codex App Server exited. code=${String(code)} signal=${String(
+            signal,
+          )}`,
+        ),
+      );
+
+      const error = new Error(
+        `Codex App Server exited. code=${String(code)} signal=${String(signal)}`,
+      );
+      this.transportError = error;
+      for (const listener of this.exitListeners) listener(error);
+
+      this.child = null;
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", () => {
+        console.log("[CODEX] Process started.");
+
+        resolve();
+      });
+
+      child.once("error", reject);
+    });
+
+    const initializeParams: InitializeParams = {
+      clientInfo: {
+        name: "codex_orchestrator",
+
+        title: "Codex Multi-Agent Orchestrator",
+
+        version: "0.1.0",
+      },
+
+      capabilities: null,
+    };
+
+    console.log("[CODEX] Sending initialize...");
+
+    const initializeResponse = await this.request<InitializeResponse>(
+      "initialize",
+      initializeParams,
     );
 
-    const initializedNotification:
-      ClientNotification = {
-        method:
-          "initialized",
-      };
+    console.log("[CODEX] initialize accepted.");
 
-    this.notify(
-      initializedNotification,
-    );
+    const initializedNotification: ClientNotification = {
+      method: "initialized",
+    };
 
-    console.log(
-      "[CODEX] initialized notification sent.",
-    );
+    this.notify(initializedNotification);
 
-    console.log(
-      "[ORCHESTRATOR] Codex App Server READY.",
-    );
+    console.log("[CODEX] initialized notification sent.");
+
+    console.log("[ORCHESTRATOR] Codex App Server READY.");
 
     return initializeResponse;
   }
 
-  async startThread(
-    params: ThreadStartParams,
-  ): Promise<ThreadStartResponse> {
-    return this.request<ThreadStartResponse>(
-      "thread/start",
-      params,
-    );
+  async startThread(params: ThreadStartParams): Promise<ThreadStartResponse> {
+    return this.request<ThreadStartResponse>("thread/start", params);
   }
 
   async resumeThread(
     params: ThreadResumeParams,
   ): Promise<ThreadResumeResponse> {
-    return this.request<ThreadResumeResponse>(
-      "thread/resume",
-      params,
-    );
+    return this.request<ThreadResumeResponse>("thread/resume", params);
   }
 
   async runTurn(
     threadId: string,
     text: string,
     outputSchema?: JsonValue,
-    options?: { timeoutMs?: number },
+    options?: TurnOptions,
   ): Promise<RunTurnResult> {
-    const params:
-      TurnStartParams = {
-        threadId,
+    await options?.beforeStart?.();
+    const params: TurnStartParams = {
+      threadId,
+      cwd: options?.cwd ?? null,
+      sandboxPolicy: options?.readOnly
+        ? { type: "readOnly", networkAccess: true }
+        : options?.writableRoots
+          ? {
+              type: "workspaceWrite",
+              writableRoots: options.writableRoots,
+              networkAccess: true,
+              excludeTmpdirEnvVar: true,
+              excludeSlashTmp: true,
+            }
+          : null,
+      input: [
+        {
+          type: "text",
+          text,
+          text_elements: [],
+        },
+      ],
 
-        input: [
-          {
-            type: "text",
-            text,
-            text_elements: [],
-          },
-        ],
+      outputSchema: outputSchema ?? null,
+    };
 
-        outputSchema:
-          outputSchema ?? null,
+    const response = await this.request<TurnStartResponse>(
+      "turn/start",
+      params,
+    );
+
+    const turnId = response.turn.id;
+
+    console.log(`[CODEX] Turn started: ${turnId}`);
+
+    const key = this.turnKey(threadId, turnId);
+    const completion = this.waitForTurnCompletion(
+      threadId,
+      turnId,
+      options?.timeoutMs,
+    );
+    // Attach immediately: the transport can fail while the durable start hook runs.
+    void completion.catch(() => {});
+    try {
+      try {
+        await options?.onStarted?.(threadId, turnId);
+      } catch (error) {
+        await this.interruptTurn(threadId, turnId);
+        throw error;
+      }
+      const completed = await completion;
+      if (completed.turn.error)
+        throw new CodexTurnError(completed.turn.error, threadId, turnId);
+      return {
+        turnId,
+        text:
+          this.extractFinalAgentMessage(completed) ??
+          this.streamedAgentText.get(key) ??
+          "",
+        turn: completed.turn,
       };
+    } finally {
+      this.completedTurns.delete(key);
+      this.streamedAgentText.delete(key);
+      this.retiredTurns.add(key);
+      if (this.retiredTurns.size > 1000)
+        this.retiredTurns.delete(this.retiredTurns.values().next().value!);
+    }
+  }
 
-    const response =
-      await this.request<TurnStartResponse>(
-        "turn/start",
+  async interruptTurn(
+    threadId: string,
+    turnId: string,
+  ): Promise<TurnInterruptResponse> {
+    if (this.retiredTurns.has(this.turnKey(threadId, turnId))) return {};
+    const params: TurnInterruptParams = { threadId, turnId };
+    let response: TurnInterruptResponse;
+    try {
+      response = await this.request<TurnInterruptResponse>(
+        "turn/interrupt",
         params,
       );
-
-    const turnId =
-      response.turn.id;
-
-    console.log(
-      `[CODEX] Turn started: ${turnId}`,
-    );
-
-    const completed =
-      await this.waitForTurnCompletion(
-        threadId,
-        turnId,
-        options?.timeoutMs,
-      );
-
-    if (
-      completed.turn.error
-    ) {
-      throw new Error(
-        `Codex turn failed: ${JSON.stringify(
-          completed.turn.error,
-        )}`,
-      );
+    } catch (error) {
+      // A restored thread may already have durably completed the recorded turn.
+      if (
+        !(error instanceof CodexRpcError) ||
+        !/no active turn|turn .* is not active|turn .* already completed/i.test(
+          error.message,
+        )
+      )
+        throw error;
+      response = {};
     }
-
-    const finalMessage =
-      this.extractFinalAgentMessage(
-        completed,
-      ) ??
-      this.streamedAgentText.get(
-        this.turnKey(
-          threadId,
-          turnId,
-        ),
-      ) ??
-      "";
-
-    this.completedTurns.delete(
-      this.turnKey(
-        threadId,
-        turnId,
-      ),
+    this.turnWaiters.get(this.turnKey(threadId, turnId))?.(
+      new Error("Turn cancelled"),
     );
-
-    this.streamedAgentText.delete(
-      this.turnKey(
-        threadId,
-        turnId,
-      ),
-    );
-
-    return {
-      turnId,
-      text:
-        finalMessage,
-      turn:
-        completed.turn,
-    };
+    return response;
   }
 
   async getAccountRateLimits(): Promise<GetAccountRateLimitsResponse> {
-    return this.request<GetAccountRateLimitsResponse>("account/rateLimits/read", undefined);
+    return this.request<GetAccountRateLimitsResponse>(
+      "account/rateLimits/read",
+      undefined,
+    );
   }
 
-  async request<T>(
-    method: string,
-    params: unknown,
-  ): Promise<T> {
-    const id =
-      this.nextRequestId++;
+  async request<T>(method: string, params: unknown): Promise<T> {
+    const id = this.nextRequestId++;
 
-    return new Promise<T>(
-      (
-        resolve,
+    return new Promise<T>((resolve, reject) => {
+      this.pendingRequests.set(id, {
+        resolve: (value) => resolve(value as T),
+
         reject,
-      ) => {
-        this.pendingRequests.set(
-          id,
-          {
-            resolve:
-              (value) =>
-                resolve(
-                  value as T,
-                ),
+      });
 
-            reject,
-          },
-        );
-
-        this.send({
-          method,
-          id,
-          params,
-        });
-      },
-    );
+      try {
+        this.send({ method, id, params });
+      } catch (error) {
+        this.pendingRequests.delete(id);
+        reject(error);
+      }
+    });
   }
 
-  notify(
-    notification:
-      ClientNotification,
-  ): void {
-    this.send(
-      notification,
-    );
+  notify(notification: ClientNotification): void {
+    this.send(notification);
   }
 
-  onNotification(
-    listener:
-      NotificationListener,
-  ): () => void {
-    this.notificationListeners.add(
-      listener,
-    );
+  onNotification(listener: NotificationListener): () => void {
+    this.notificationListeners.add(listener);
 
     return () => {
-      this.notificationListeners.delete(
-        listener,
-      );
+      this.notificationListeners.delete(listener);
     };
   }
 
   stop(): void {
-    if (
-      !this.child
-    ) {
+    const error = new Error("Codex App Server transport stopped");
+    this.transportError = error;
+    this.rejectAllPendingRequests(error);
+    for (const listener of [...this.exitListeners]) listener(error);
+    if (!this.child) {
       return;
     }
 
-    console.log(
-      "[ORCHESTRATOR] Stopping Codex App Server...",
-    );
+    console.log("[ORCHESTRATOR] Stopping Codex App Server...");
 
     this.child.stdin.end();
 
@@ -441,254 +368,124 @@ export class CodexAppServerClient {
     turnId: string,
     timeoutMs?: number,
   ): Promise<TurnCompletedNotification> {
-    const key =
-      this.turnKey(
-        threadId,
-        turnId,
-      );
-
-    const alreadyCompleted =
-      this.completedTurns.get(
-        key,
-      );
-
-    if (
-      alreadyCompleted
-    ) {
-      return Promise.resolve(
-        alreadyCompleted,
-      );
-    }
-
-    return new Promise(
-      (
-        resolve,
-        reject,
-      ) => {
-        const unsubscribe =
-          this.onNotification(
-            (
-              notification,
-            ) => {
-              if (
-                notification.method !==
-                "turn/completed"
-              ) {
-                return;
-              }
-
-              const params =
-                notification.params as TurnCompletedNotification;
-
-              if (
-                params.threadId !==
-                  threadId ||
-                params.turn.id !==
-                  turnId
-              ) {
-                return;
-              }
-
-              if (timeout) clearTimeout(timeout);
-
-              unsubscribe();
-              this.exitListeners.delete(onExit);
-
-              resolve(
-                params,
-              );
-          },
+    const key = this.turnKey(threadId, turnId);
+    const completed = this.completedTurns.get(key);
+    if (completed) return Promise.resolve(completed);
+    if (this.transportError) return Promise.reject(this.transportError);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        unsubscribe();
+        this.exitListeners.delete(fail);
+        this.turnWaiters.delete(key);
+      };
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const unsubscribe = this.onNotification((notification) => {
+        if (notification.method !== "turn/completed") return;
+        const params = notification.params as TurnCompletedNotification;
+        if (
+          params.threadId !== threadId ||
+          params.turn.id !== turnId ||
+          settled
+        )
+          return;
+        settled = true;
+        cleanup();
+        resolve(params);
+      });
+      this.exitListeners.add(fail);
+      this.turnWaiters.set(key, fail);
+      if (timeoutMs !== undefined)
+        timer = setTimeout(
+          () => fail(new Error(`Timed out waiting for turn ${turnId}`)),
+          timeoutMs,
         );
-
-        const onExit = (error: Error) => {
-          if (timeout) clearTimeout(timeout);
-          unsubscribe();
-          this.exitListeners.delete(onExit);
-          reject(error);
-        };
-        this.exitListeners.add(onExit);
-
-        const timeout = timeoutMs === undefined ? undefined : setTimeout(
-            () => {
-              unsubscribe();
-              this.exitListeners.delete(onExit);
-
-              reject(
-                new Error(
-                  `Timed out waiting for turn ${turnId} to complete.`,
-                ),
-              );
-            },
-
-            timeoutMs,
-          );
-      },
-    );
+    });
   }
 
   private extractFinalAgentMessage(
-    completed:
-      TurnCompletedNotification,
+    completed: TurnCompletedNotification,
   ): string | null {
-    const messages =
-      completed.turn.items.filter(
-        (item) =>
-          item.type ===
-          "agentMessage",
-      );
+    const messages = completed.turn.items.filter(
+      (item) => item.type === "agentMessage",
+    );
 
-    if (
-      messages.length === 0
-    ) {
+    if (messages.length === 0) {
       return null;
     }
 
-    return (
-      messages[
-        messages.length - 1
-      ]?.text ?? null
-    );
+    return messages[messages.length - 1]?.text ?? null;
   }
 
-  private spawnCodexAppServer():
-    ChildProcessWithoutNullStreams {
-    if (
-      process.platform ===
-      "win32"
-    ) {
-      const shell =
-        process.env.ComSpec ??
-        "cmd.exe";
+  private spawnCodexAppServer(): ChildProcessWithoutNullStreams {
+    if (process.platform === "win32") {
+      const shell = process.env.ComSpec ?? "cmd.exe";
 
-      return spawn(
-        shell,
-        [
-          "/d",
-          "/s",
-          "/c",
-          "codex app-server --stdio",
-        ],
-        {
-          stdio: [
-            "pipe",
-            "pipe",
-            "pipe",
-          ],
+      return spawn(shell, ["/d", "/s", "/c", "codex app-server --stdio"], {
+        stdio: ["pipe", "pipe", "pipe"],
 
-          windowsHide:
-            true,
-        },
-      );
+        windowsHide: true,
+      });
     }
 
-    return spawn(
-      "codex",
-      [
-        "app-server",
-        "--stdio",
-      ],
-      {
-        stdio: [
-          "pipe",
-          "pipe",
-          "pipe",
-        ],
-      },
-    );
+    return spawn("codex", ["app-server", "--stdio"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
   }
 
-  private send(
-    message: unknown,
-  ): void {
-    if (
-      !this.child
-    ) {
-      throw new Error(
-        "Codex App Server is not running.",
-      );
+  private send(message: unknown): void {
+    if (!this.child) {
+      throw new Error("Codex App Server is not running.");
     }
 
-    const serialized =
-      JSON.stringify(
-        message,
-      );
+    const serialized = JSON.stringify(message);
 
-    this.child.stdin.write(
-      `${serialized}\n`,
-    );
+    this.child.stdin.write(`${serialized}\n`);
   }
 
-  private handleServerLine(
-    line: string,
-  ): void {
-    const trimmed =
-      line.trim();
+  private handleServerLine(line: string): void {
+    const trimmed = line.trim();
 
-    if (
-      !trimmed
-    ) {
+    if (!trimmed) {
       return;
     }
 
-    let message:
-      unknown;
+    let message: unknown;
 
     try {
-      message =
-        JSON.parse(
-          trimmed,
-        );
+      message = JSON.parse(trimmed);
     } catch {
-      console.error(
-        "[CODEX] Received invalid JSON:",
-        trimmed,
-      );
+      console.error("[CODEX] Received invalid JSON:", trimmed);
 
       return;
     }
 
-    if (
-      this.isRpcResponse(
-        message,
-      )
-    ) {
-      this.handleRpcResponse(
-        message,
-      );
+    if (this.isRpcResponse(message)) {
+      this.handleRpcResponse(message);
 
       return;
     }
 
-    if (
-      this.isServerNotification(
-        message,
-      )
-    ) {
-      this.handleNotification(
-        message,
-      );
+    if (this.isServerNotification(message)) {
+      this.handleNotification(message);
 
       return;
     }
 
-    console.log(
-      "[CODEX SERVER MESSAGE]",
-      message,
-    );
+    console.log("[CODEX SERVER MESSAGE]", message);
   }
 
-  private handleRpcResponse(
-    message:
-      RpcResponse,
-  ): void {
-    const pending =
-      this.pendingRequests.get(
-        message.id,
-      );
+  private handleRpcResponse(message: RpcResponse): void {
+    const pending = this.pendingRequests.get(message.id);
 
-    if (
-      !pending
-    ) {
+    if (!pending) {
       console.warn(
         `[CODEX] Received response for unknown request id ${String(
           message.id,
@@ -698,158 +495,85 @@ export class CodexAppServerClient {
       return;
     }
 
-    this.pendingRequests.delete(
-      message.id,
-    );
+    this.pendingRequests.delete(message.id);
 
-    if (
-      "error" in
-      message
-    ) {
+    if ("error" in message) {
       pending.reject(
-        new Error(
-          `Codex RPC error ${message.error.code}: ${message.error.message}`,
+        new CodexRpcError(
+          message.error.code,
+          message.error.message,
+          message.error.data,
         ),
       );
 
       return;
     }
 
-    pending.resolve(
-      message.result,
-    );
+    pending.resolve(message.result);
   }
 
-  private handleNotification(
-    notification:
-      ServerNotification,
-  ): void {
-    if (
-      notification.method ===
-      "item/agentMessage/delta"
-    ) {
-      const params =
-        notification.params as AgentMessageDeltaNotification;
+  private handleNotification(notification: ServerNotification): void {
+    if (notification.method === "item/agentMessage/delta") {
+      const params = notification.params as AgentMessageDeltaNotification;
 
-      const key =
-        this.turnKey(
-          params.threadId,
-          params.turnId,
-        );
+      const key = this.turnKey(params.threadId, params.turnId);
 
-      const previous =
-        this.streamedAgentText.get(
-          key,
-        ) ?? "";
+      if (this.retiredTurns.has(key)) return;
+      const previous = this.streamedAgentText.get(key) ?? "";
 
-      this.streamedAgentText.set(
-        key,
-        previous +
-          params.delta,
-      );
+      this.streamedAgentText.set(key, previous + params.delta);
     }
 
-    if (
-      notification.method ===
-      "turn/completed"
-    ) {
-      const params =
-        notification.params as TurnCompletedNotification;
+    if (notification.method === "turn/completed") {
+      const params = notification.params as TurnCompletedNotification;
 
+      if (this.retiredTurns.has(this.turnKey(params.threadId, params.turn.id)))
+        return;
       this.completedTurns.set(
-        this.turnKey(
-          params.threadId,
-          params.turn.id,
-        ),
+        this.turnKey(params.threadId, params.turn.id),
         params,
       );
     }
 
-    for (
-      const listener
-      of this.notificationListeners
-    ) {
-      listener(
-        notification,
-      );
+    for (const listener of this.notificationListeners) {
+      listener(notification);
     }
   }
 
-  private isRpcResponse(
-    value: unknown,
-  ): value is RpcResponse {
-    if (
-      typeof value !==
-        "object" ||
-      value === null
-    ) {
+  private isRpcResponse(value: unknown): value is RpcResponse {
+    if (typeof value !== "object" || value === null) {
       return false;
     }
 
-    const candidate =
-      value as Record<
-        string,
-        unknown
-      >;
+    const candidate = value as Record<string, unknown>;
 
     return (
-      (
-        "id" in candidate &&
-        "result" in candidate
-      ) ||
-      (
-        "id" in candidate &&
-        "error" in candidate
-      )
+      ("id" in candidate && "result" in candidate) ||
+      ("id" in candidate && "error" in candidate)
     );
   }
 
-  private isServerNotification(
-    value: unknown,
-  ): value is ServerNotification {
-    if (
-      typeof value !==
-        "object" ||
-      value === null
-    ) {
+  private isServerNotification(value: unknown): value is ServerNotification {
+    if (typeof value !== "object" || value === null) {
       return false;
     }
 
-    const candidate =
-      value as Record<
-        string,
-        unknown
-      >;
+    const candidate = value as Record<string, unknown>;
 
     return (
-      !(
-        "id" in
-        candidate
-      ) &&
-      typeof candidate.method ===
-        "string" &&
-      "params" in
-        candidate
+      !("id" in candidate) &&
+      typeof candidate.method === "string" &&
+      "params" in candidate
     );
   }
 
-  private turnKey(
-    threadId: string,
-    turnId: string,
-  ): string {
+  private turnKey(threadId: string, turnId: string): string {
     return `${threadId}:${turnId}`;
   }
 
-  private rejectAllPendingRequests(
-    error: Error,
-  ): void {
-    for (
-      const pending
-      of this.pendingRequests.values()
-    ) {
-      pending.reject(
-        error,
-      );
+  private rejectAllPendingRequests(error: Error): void {
+    for (const pending of this.pendingRequests.values()) {
+      pending.reject(error);
     }
 
     this.pendingRequests.clear();

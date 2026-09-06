@@ -28,7 +28,9 @@ export const ProjectTopologySchema = z.object({
 export type ProjectTopology = z.infer<typeof ProjectTopologySchema>;
 
 export function normalizeAbsolutePath(input: string): string {
-  return path.resolve(input).replace(/[\\/]+$/, "");
+  const withoutNamespace =
+    process.platform === "win32" ? input.replace(/^\\\\\?\\/, "") : input;
+  return comparable(path.resolve(withoutNamespace).replace(/[\\/]+$/, ""));
 }
 
 export function toPortablePath(input: string): string {
@@ -79,12 +81,16 @@ export class TopologyService {
   rulesFor(repositoryId: string, relativePath: string) {
     const repository = this.topology.repositories.find((item) => item.id === repositoryId);
     if (!repository) throw new Error(`Unknown repository: ${repositoryId}`);
-    return repository.ownership.filter((rule) => matchPath(rule.pattern, relativePath));
+    const matches = repository.ownership.filter((rule) => matchPath(rule.pattern, relativePath));
+    const specificity = (rule: typeof repository.ownership[number]) => rule.pattern.replace(/[*/]/g, "").length;
+    const best = Math.max(-1, ...matches.map(specificity));
+    return matches.filter((rule) => specificity(rule) === best);
   }
 
   may(role: Role, repositoryId: string, relativePath: string, action: "read" | "write"): boolean {
     if (role === "architect" && action === "read") return true;
     const rules = this.rulesFor(repositoryId, relativePath);
+    if (action === "write" && role !== "architect" && rules.some((rule) => rule.architectControlled)) return false;
     return rules.some((rule) => (action === "read" ? rule.readableBy : rule.writableBy).includes(role));
   }
 
@@ -115,8 +121,9 @@ export class TopologyService {
     const location = this.repositoryForPath(absolutePath);
     if (!location) throw new Error(`Path is outside configured repositories: ${absolutePath}`);
     try {
+      const repositoryRoot = await realpath(location.repository.root);
       const resolved = await realpath(absolutePath);
-      if (!isPathWithin(location.repository.root, resolved)) throw new Error(`Symlink escapes repository root: ${absolutePath}`);
+      if (!isPathWithin(repositoryRoot, resolved)) throw new Error(`Symlink escapes repository root: ${absolutePath}`);
     } catch (error) {
       if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;

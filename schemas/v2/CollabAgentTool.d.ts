@@ -1,2 +1,0 @@
-export type CollabAgentTool = "spawnAgent" | "sendInput" | "resumeAgent" | "wait" | "closeAgent" | "sendMessage" | "followupTask" | "interruptAgent" | "listAgents";
-//# sourceMappingURL=CollabAgentTool.d.ts.map

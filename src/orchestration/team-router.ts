@@ -1,3 +1,4 @@
+import type { TurnOptions } from "../codex/app-server-client";
 import type { BackendAgent } from "../agents/backend";
 import type { FrontendAgent } from "../agents/frontend";
 
@@ -10,49 +11,34 @@ import type { OwnershipVerifier } from "../projects/ownership";
 
 export class TeamRouter {
   constructor(
-    private readonly backend:
-      BackendAgent,
+    private readonly backend: BackendAgent,
 
-    private readonly frontend:
-      FrontendAgent,
+    private readonly frontend: FrontendAgent,
     private readonly ownership?: OwnershipVerifier,
   ) {}
 
   async routeTask(
     assignment: TaskAssignment,
+    options?: TurnOptions,
   ): Promise<TaskReport> {
     console.log(
       `[ROUTER] Routing task ${assignment.taskId} -> ${assignment.assignedTo.toUpperCase()}`,
     );
 
-    const message =
-      this.createDeveloperPrompt(
-        assignment,
-      );
+    const message = this.createDeveloperPrompt(assignment);
 
     const result =
-      assignment.assignedTo ===
-      "backend"
-        ? await this.backend.sendStructured(
-            message,
-            TaskReportSchema,
-          )
+      assignment.assignedTo === "backend"
+        ? await this.backend.sendStructured(message, TaskReportSchema, options)
         : await this.frontend.sendStructured(
             message,
             TaskReportSchema,
+            options,
           );
 
-    this.assertReportMatchesAssignment(
-      assignment,
-      result.data,
-    );
+    this.assertReportMatchesAssignment(assignment, result.data);
 
-    if (result.data.status === "READY_FOR_REVIEW" && this.ownership) {
-      const validation = await this.ownership.validateGitDiff(assignment, result.data);
-      if (!validation.ok) {
-        throw new Error(`Ownership verification rejected TASK_REPORT:\n${validation.violations.join("\n")}`);
-      }
-    }
+    // Durable WorkflowRunner owns task-scoped verification and persistence. Router only transports.
 
     console.log(
       `[ROUTER] Task report received: ${result.data.taskId} / ${result.data.status}`,
@@ -61,20 +47,18 @@ export class TeamRouter {
     return result.data;
   }
 
-  private createDeveloperPrompt(
-    assignment: TaskAssignment,
-  ): string {
+  getThreadId(role: "backend" | "frontend"): string {
+    return (role === "backend" ? this.backend : this.frontend).getThreadId();
+  }
+
+  private createDeveloperPrompt(assignment: TaskAssignment): string {
     return `
 You have received a formal TASK_ASSIGNMENT from the Software Architect.
 
 The assignment below is authoritative.
 
 TASK_ASSIGNMENT:
-${JSON.stringify(
-  assignment,
-  null,
-  2,
-)}
+${JSON.stringify(assignment, null, 2)}
 
 Execute this task according to the assignment and your role instructions.
 
@@ -99,10 +83,7 @@ The agent field must be "${assignment.assignedTo}".
     assignment: TaskAssignment,
     report: TaskReport,
   ): void {
-    if (
-      report.taskId !==
-      assignment.taskId
-    ) {
+    if (report.taskId !== assignment.taskId) {
       throw new Error(
         [
           "Developer report task mismatch.",
@@ -112,10 +93,7 @@ The agent field must be "${assignment.assignedTo}".
       );
     }
 
-    if (
-      report.agent !==
-      assignment.assignedTo
-    ) {
+    if (report.agent !== assignment.assignedTo) {
       throw new Error(
         [
           "Developer report agent mismatch.",

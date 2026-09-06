@@ -1,1 +1,0 @@
-{"version":3,"file":"RemoteControlStatusChangedNotification.d.ts","sourceRoot":"","sources":["RemoteControlStatusChangedNotification.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,6BAA6B,EAAE,MAAM,iCAAiC,CAAC;AAErF;;GAEG;AACH,MAAM,MAAM,sCAAsC,GAAG;IAAE,MAAM,EAAE,6BAA6B,CAAC;IAAC,UAAU,EAAE,MAAM,CAAC;IAAC,cAAc,EAAE,MAAM,CAAC;IAAC,aAAa,EAAE,MAAM,GAAG,IAAI,CAAC;CAAE,CAAC"}

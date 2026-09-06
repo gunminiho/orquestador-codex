@@ -1,1 +1,0 @@
-{"version":3,"file":"GrantedPermissionProfile.d.ts","sourceRoot":"","sources":["GrantedPermissionProfile.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,+BAA+B,EAAE,MAAM,mCAAmC,CAAC;AACzF,OAAO,KAAK,EAAE,4BAA4B,EAAE,MAAM,gCAAgC,CAAC;AAEnF,MAAM,MAAM,wBAAwB,GAAG;IAAE,OAAO,CAAC,EAAE,4BAA4B,CAAC;IAAC,UAAU,CAAC,EAAE,+BAA+B,CAAC;CAAE,CAAC"}

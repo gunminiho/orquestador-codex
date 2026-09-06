@@ -1,1 +1,0 @@
-{"version":3,"file":"ThreadSectionMoveParams.d.ts","sourceRoot":"","sources":["ThreadSectionMoveParams.ts"],"names":[],"mappings":"AAIA;;GAEG;AACH,MAAM,MAAM,uBAAuB,GAAG;IACtC;;OAEG;IACH,QAAQ,EAAE,MAAM,CAAC;IACjB;;OAEG;IACH,SAAS,EAAE,MAAM,GAAG,IAAI,CAAC;IACzB;;OAEG;IACH,cAAc,CAAC,EAAE,MAAM,GAAG,IAAI,CAAC;CAAE,CAAC"}

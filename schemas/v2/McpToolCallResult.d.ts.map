@@ -1,1 +1,0 @@
-{"version":3,"file":"McpToolCallResult.d.ts","sourceRoot":"","sources":["McpToolCallResult.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,yBAAyB,CAAC;AAEzD,MAAM,MAAM,iBAAiB,GAAG;IAAE,OAAO,EAAE,KAAK,CAAC,SAAS,CAAC,CAAC;IAAC,iBAAiB,EAAE,SAAS,GAAG,IAAI,CAAC;IAAC,KAAK,EAAE,SAAS,GAAG,IAAI,CAAC;CAAE,CAAC"}

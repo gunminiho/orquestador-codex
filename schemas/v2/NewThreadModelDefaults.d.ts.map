@@ -1,1 +1,0 @@
-{"version":3,"file":"NewThreadModelDefaults.d.ts","sourceRoot":"","sources":["NewThreadModelDefaults.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,eAAe,EAAE,MAAM,oBAAoB,CAAC;AAE1D,MAAM,MAAM,sBAAsB,GAAG;IAAE,KAAK,EAAE,MAAM,GAAG,IAAI,CAAC;IAAC,oBAAoB,EAAE,eAAe,GAAG,IAAI,CAAC;IAAC,WAAW,EAAE,MAAM,GAAG,IAAI,CAAC;CAAE,CAAC"}

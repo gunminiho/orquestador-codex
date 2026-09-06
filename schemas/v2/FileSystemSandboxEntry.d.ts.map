@@ -1,1 +1,0 @@
-{"version":3,"file":"FileSystemSandboxEntry.d.ts","sourceRoot":"","sources":["FileSystemSandboxEntry.ts"],"names":[],"mappings":"AAGA,OAAO,KAAK,EAAE,oBAAoB,EAAE,MAAM,wBAAwB,CAAC;AACnE,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,kBAAkB,CAAC;AAEvD,MAAM,MAAM,sBAAsB,GAAG;IAAE,IAAI,EAAE,cAAc,CAAC;IAAC,MAAM,EAAE,oBAAoB,CAAC;CAAE,CAAC"}
