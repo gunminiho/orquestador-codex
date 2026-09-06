@@ -79,7 +79,10 @@ export class TopologyService {
   rulesFor(repositoryId: string, relativePath: string) {
     const repository = this.topology.repositories.find((item) => item.id === repositoryId);
     if (!repository) throw new Error(`Unknown repository: ${repositoryId}`);
-    return repository.ownership.filter((rule) => matchPath(rule.pattern, relativePath));
+    const matches = repository.ownership.filter((rule) => matchPath(rule.pattern, relativePath));
+    const specificity = (rule: typeof repository.ownership[number]) => rule.pattern.replace(/[*/]/g, "").length;
+    const best = Math.max(-1, ...matches.map(specificity));
+    return matches.filter((rule) => specificity(rule) === best);
   }
 
   may(role: Role, repositoryId: string, relativePath: string, action: "read" | "write"): boolean {
